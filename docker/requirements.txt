@@ -7,3 +7,5 @@ pandas
 scikit-learn
 pytorch_metric_learning
 h5py
+numpy
+tensorboard
