@@ -36,7 +36,7 @@ def evaluate_4drad_dataset(model, device, dataset, params):
         params.model_params.input_representation,
     )
 
-    dataloder = DataLoader(
+    dataloader = DataLoader(
         dataset,
         batch_size=params.val_batch_size,
         collate_fn=val_collate_fn,
@@ -48,7 +48,7 @@ def evaluate_4drad_dataset(model, device, dataset, params):
     embeddings_dataset = torch.empty((len(dataset), 256))
     
     with torch.no_grad():
-        for iteration, batch in enumerate(tqdm(dataloder, desc="==> Computing embeddings")):
+        for iteration, batch in enumerate(tqdm(dataloader, desc="==> Computing embeddings")):
             embeddings_l = []
             for minibatch in batch:
                 minibatch = {e: minibatch[e].to(device) for e in minibatch}

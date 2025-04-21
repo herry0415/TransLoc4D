@@ -45,7 +45,7 @@ class CartesianQuantizer(Quantizer):
     def __call__(self, pc):
         if pc.shape[1] == 5:
             quantized_pc, ndx = ME.utils.sparse_quantize(
-                self.normalize_xyz(pc[:, :3]),
+                self.normalize_xyz(pc[:, :3].contiguous()),
                 quantization_size=self.quant_step,
                 return_index=True,
             )

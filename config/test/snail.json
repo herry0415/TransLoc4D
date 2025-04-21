@@ -1,0 +1,21 @@
+[
+  {
+    "dataset_root": "/datasets/snail-radar_tl4d",
+    "datasets": [
+        "bc_test",
+        "sl_test",
+        "ss_test",
+        "if_test",
+        "iaf_test",
+        "iaef_test",
+        "st_test",
+        "81r_test",
+        "snail_val"
+    ],
+    "weights_paths": [
+      "weights/transloc4d.pth"
+    ],
+    "model_config": "config/model/transloc4d.txt",
+    "posDist": 9
+  }
+]

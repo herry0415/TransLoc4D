@@ -1,0 +1,17 @@
+[  
+  {
+    "dataset_root": "/home/user/datasets",
+    "datasets": [
+      "ntu-rsvi_val",
+      "sjtu-rsvi_test_a",
+      "sjtu-rsvi_test_b",
+      "nyl-rain-rsvi_test",
+      "nyl-night-rsvi_test",
+      "src-night-rsvi_test"
+    ],
+    "weights_paths": [
+      "weights/transloc4d.pth"
+    ],
+    "model_config": "config/model/transloc4d.txt"
+  }
+]
