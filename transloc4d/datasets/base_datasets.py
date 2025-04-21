@@ -47,6 +47,7 @@ class EvaluationTuple:
 class TrainingDataset(Dataset):
     def __init__(self, dataset_path, query_filename, transform=None, set_transform=None):
         # remove_zero_points: remove points with all zero coords
+        print(f"==> Loading training dataset from {dataset_path}")
         assert os.path.exists(dataset_path), 'Cannot access dataset path: {}'.format(dataset_path)
         self.dataset_path = dataset_path
         self.query_filepath = os.path.join(dataset_path, query_filename)
@@ -54,7 +55,7 @@ class TrainingDataset(Dataset):
         self.transform = transform
         self.set_transform = set_transform
         self.queries: Dict[int, TrainingTuple] = pickle.load(open(self.query_filepath, 'rb'))
-        print(f"Number of queries: {len(self)}")
+        print(f"  Loaded {len(self.queries)} queries")
 
         # pc_loader must be set in the inheriting class
         self.pc_loader: PointCloudLoader = None

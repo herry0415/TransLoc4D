@@ -64,16 +64,20 @@ class MinkLoc(torch.nn.Module):
         return {"global": x}
 
     def print_info(self):
-        print("Model class: MinkLoc")
         n_params = sum([param.nelement() for param in self.parameters()])
-        print(f"Total parameters: {n_params}")
+        print(f"  Model class: {type(self).__name__} #parameters: {n_params}")
         n_params = sum([param.nelement() for param in self.backbone.parameters()])
-        print(f"Backbone: {type(self.backbone).__name__} #parameters: {n_params}")
+        print(f"  Backbone: {type(self.backbone).__name__} #parameters: {n_params}")
+        if self.linearselfatt is not None:
+            n_params = sum(
+                [param.nelement() for param in self.linearselfatt.parameters()]
+            )
+            print(f"  Self-attention: {type(self.linearselfatt).__name__} #parameters: {n_params}")
         n_params = sum([param.nelement() for param in self.pooling.parameters()])
-        print(f"Pooling method: {self.pooling.pool_method}   #parameters: {n_params}")
-        print("# channels from the backbone: {}".format(self.pooling.in_dim))
-        print("# output channels : {}".format(self.pooling.output_dim))
-        print(f"Embedding normalization: {self.normalize_embeddings}")
+        print(f"  Pooling: {self.pooling.pool_method}   #parameters: {n_params}")
+        print("  Channels from the backbone: {}".format(self.pooling.in_dim))
+        print("  Output channels : {}".format(self.pooling.output_dim))
+        print(f"  Embedding normalization: {self.normalize_embeddings}")
 
     def forward_local(self, batch):
         x = ME.SparseTensor(batch["features"], coordinates=batch["coords"])

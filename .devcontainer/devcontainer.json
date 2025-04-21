@@ -15,7 +15,11 @@
             "path": "/bin/zsh"
           }
         },
-        "terminal.integrated.defaultProfile.linux": "zsh"
+        "terminal.integrated.defaultProfile.linux": "zsh",
+        "jupyter.widgetScriptSources": [
+          "unpkg.com",
+          "jsdelivr.com"
+        ]
       },
 
       // Add the IDs of extensions you want installed when the container is created.

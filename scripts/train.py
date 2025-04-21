@@ -2,7 +2,6 @@
 
 import os
 import sys
-
 import argparse
 import torch
 from shutil import copyfile
@@ -12,6 +11,7 @@ import json
 import numpy as np
 import tqdm
 import pathlib
+from torch.utils.tensorboard import SummaryWriter  # TensorBoard import
 
 from transloc4d import evaluate_4drad_dataset, save_recall_results
 from transloc4d.misc.utils import TrainingParams
@@ -195,18 +195,18 @@ def do_train(params: TrainingParams, model_name, weights_folder, resume_filename
     # Create model class
     model = get_model(params, device, resume_filename)
 
-    print('Model name: {}'.format(model_name))
+    print(f"==> Loaded model checkpoint: {model_name}")
 
     model_pathname = os.path.join(weights_folder, model_name)
     if hasattr(model, 'print_info'):
         model.print_info()
     else:
         n_params = sum([param.nelement() for param in model.parameters()])
-        print('Number of model parameters: {}'.format(n_params))
+        print('  Number of model parameters: {}'.format(n_params))
 
     # Move the model to the proper device before configuring the optimizer
     model.to(device)
-    print('Model device: {}'.format(device))
+    print('  Model device: {}'.format(device))
 
     # set up dataloaders
     # dataloaders = make_dataloaders(params)
@@ -257,95 +257,83 @@ def do_train(params: TrainingParams, model_name, weights_folder, resume_filename
     # Training statistics
     stats = {'train': [], 'eval': []}
 
-    if 'val' in dataloaders:
-        # Validation phase
-        phases = ['train', 'val']
-        # phases = ['val']
-        stats['val'] = []
-    else:
-        phases = ['train']
-
     train_metrics = {
         "best_epoch": 1,
         "best_r@1": 0,
         "metrics": []
     }
-    for epoch in tqdm.tqdm(range(start_epoch + 1, params.epochs + 1)):
-        metrics = {'epoch': epoch, 'train': {}, 'val': {}}      # Metrics for wandb reporting
+    
+    # Initialize TensorBoard writer using weights_folder as log directory.
+    writer = SummaryWriter(log_dir=weights_folder)
+
+    for epoch in tqdm.tqdm(range(start_epoch + 1, params.epochs + 1), desc="==> Training Epoch", unit="epoch", leave=False):
+        metrics = {'epoch': epoch, 'train': {}, 'val': {}}
         current_val_recall = 0
-        print(f">> epoch: {epoch}, lr: {optimizer.param_groups[0]['lr']}:", end=' ')
+        tqdm.tqdm.write(f">> epoch: {epoch}, lr: {optimizer.param_groups[0]['lr']}:", end=' ')
 
-        for phase in phases:
-            running_stats = []  # running stats for the current epoch and phase
+        # Training phase
+        phase = 'train'
+        running_stats = []
+        # Wrap inner loop with a tqdm progress bar.
+        data_loader = dataloaders['train']
+        try:
+            total_batches = len(data_loader)
+        except TypeError:
+            total_batches = None
+        global_iter = iter(data_loader)
+        with tqdm.tqdm(total=total_batches, desc=f"===> Batches", unit="batch", leave=False) as pbar:
             count_batches = 0
-
-            if phase == 'train':
-                global_iter = iter(dataloaders['train'])
-            else:
-                global_iter = None if dataloaders['val'] is None else iter(dataloaders['val'])
-
             while True:
                 count_batches += 1
-                batch_stats = {}
                 if params.debug and count_batches > 2:
                     break
-
                 try:
                     temp_stats = train_step_fn(global_iter, model, phase, device, optimizer, loss_fn)
-                    batch_stats['global'] = temp_stats
-
+                    running_stats.append({'global': temp_stats})
+                    pbar.update(1)
                 except StopIteration:
-                    # Terminate the epoch when one of dataloders is exhausted
                     break
 
-                running_stats.append(batch_stats)
+        epoch_stats = {}
+        for substep in running_stats[0]:
+            epoch_stats[substep] = {}
+            for key in running_stats[0][substep]:
+                temp = [e[substep][key] for e in running_stats]
+                if type(temp[0]) is dict:
+                    epoch_stats[substep][key] = {key: np.mean([e[key] for e in temp]) for key in temp[0]}
+                elif type(temp[0]) is np.ndarray:
+                    # Mean value per vector element
+                    epoch_stats[substep][key] = np.mean(np.stack(temp), axis=0)
+                else:
+                    epoch_stats[substep][key] = np.mean(temp)
 
-            # Compute mean stats for the phase
-            epoch_stats = {}
-            for substep in running_stats[0]:
-                epoch_stats[substep] = {}
-                for key in running_stats[0][substep]:
-                    temp = [e[substep][key] for e in running_stats]
-                    if type(temp[0]) is dict:
-                        epoch_stats[substep][key] = {key: np.mean([e[key] for e in temp]) for key in temp[0]}
-                    elif type(temp[0]) is np.ndarray:
-                        # Mean value per vector element
-                        epoch_stats[substep][key] = np.mean(np.stack(temp), axis=0)
-                    else:
-                        epoch_stats[substep][key] = np.mean(temp)
+        stats[phase].append(epoch_stats)
+        stat_string = get_stats(phase, epoch_stats)
 
-            stats[phase].append(epoch_stats)
-            stat_string = get_stats(phase, epoch_stats)
+        tqdm.tqdm.write(f"    {stat_string}")
 
-            print(f"    {stat_string}")
-
-            # Log metrics for wandb
-            metrics[phase]['loss1'] = epoch_stats['global']['loss']
-            if 'num_non_zero_triplets' in epoch_stats['global']:
-                metrics[phase]['active_triplets1'] = epoch_stats['global']['num_non_zero_triplets']
-
-            if 'positive_ranking' in epoch_stats['global']:
-                metrics[phase]['positive_ranking'] = epoch_stats['global']['positive_ranking']
-
-            if 'recall' in epoch_stats['global']:
-                metrics[phase]['recall@1'] = epoch_stats['global']['recall'][1]
-
-            if 'ap' in epoch_stats['global']:
-                metrics[phase]['AP'] = epoch_stats['global']['ap']
-
-
-        # ******* FINALIZE THE EPOCH *******
+        metrics[phase]['loss1'] = epoch_stats['global']['loss']
+        if 'num_non_zero_triplets' in epoch_stats['global']:
+            metrics[phase]['active_triplets1'] = epoch_stats['global']['num_non_zero_triplets']
+        if 'positive_ranking' in epoch_stats['global']:
+            metrics[phase]['positive_ranking'] = epoch_stats['global']['positive_ranking']
+        if 'recall' in epoch_stats['global']:
+            # Save training recall@1 when phase is "train"
+            metrics[phase]['recall@1'] = epoch_stats['global']['recall'][1]
+        if 'ap' in epoch_stats['global']:
+            metrics[phase]['AP'] = epoch_stats['global']['ap']
 
 
         if scheduler is not None:
             scheduler.step()
 
-        if epoch >100 or epoch % 50 == 0 or epoch==125:
+        # Validation phase
+        if (epoch > params.save_from and epoch % params.save_freq == 0) or epoch in params.save_milestones:
+            phase = 'val'
             model.eval()
             recall_metrics = evaluate_4drad_dataset(model, device, val_set, params)
-            
-            print(f"    Valset: Recall@1: {recall_metrics[1]:.4f}, Recall@5: {recall_metrics[5]:.4f}, Recall@10: {recall_metrics[10]:.4f}")
-            metrics['val'][f'{test_database_name}--{test_query_name}'] = {
+            tqdm.tqdm.write(f"    Valset: Recall@1: {recall_metrics[1]:.4f}, Recall@5: {recall_metrics[5]:.4f}, Recall@10: {recall_metrics[10]:.4f}")
+            metrics[phase][f'{test_database_name}--{test_query_name}'] = {
                 'r@1': recall_metrics[1],
                 'r@5': recall_metrics[5],
                 'r@10': recall_metrics[10]
@@ -354,8 +342,6 @@ def do_train(params: TrainingParams, model_name, weights_folder, resume_filename
             if current_val_recall > train_metrics['best_r@1']:
                 train_metrics['best_r@1'] = current_val_recall
                 train_metrics['best_epoch'] = epoch
-                #save the best model 
-                # best_model_path = 'model_best.pth'
                 checkpoint = {
                     "net": model.state_dict(),
                     'optimizer': optimizer.state_dict(),
@@ -377,7 +363,7 @@ def do_train(params: TrainingParams, model_name, weights_folder, resume_filename
                         "epoch": epoch
                     }
                     torch.save(checkpoint, final_model_path)
-                    print(f"    @@@@ Saved model with val_recall@1 {current_val_recall:.4f} @@@")
+                    tqdm.tqdm.write(f"    @@@@ Saved model with val_recall@1 {current_val_recall:.4f} @@@")
                     model_n = os.path.basename(final_model_path).split('.')[0]
                     result_dir = os.path.dirname(final_model_path)
                     save_recall_results(model_n, f"{test_database_name}_{test_query_name}", recall_metrics, result_dir)
@@ -392,6 +378,16 @@ def do_train(params: TrainingParams, model_name, weights_folder, resume_filename
         train_metrics['metrics'].append(metrics)
         with open(os.path.join(weights_folder, "train_metrics.json"), "w") as f:
             json.dump(train_metrics, f, indent=4)
+        
+        writer.add_scalar("train/loss1", metrics['train']['loss1'], epoch)
+        writer.add_scalar("train/recall@1", metrics['train']['recall@1'], epoch)
+        # Log validation recall only when testing is performed.
+        if f'{test_database_name}--{test_query_name}' in metrics['val']:
+            writer.add_scalar("val/recall@1", metrics['val'][f'{test_database_name}--{test_query_name}']['r@1'], epoch)
+            writer.add_scalar("val/recall@5", metrics['val'][f'{test_database_name}--{test_query_name}']['r@5'], epoch)
+
+    writer.close()  # Close the TensorBoard writer when training completes
+
 
 def create_weights_folder(model_name, dataset_name):
     # Create a folder to save weights of trained models
@@ -416,30 +412,29 @@ if __name__ == '__main__':
     parser.add_argument("--gpu_id", type=int, default=2, help="GPU ID to use")
 
     args = parser.parse_args()
-    print('Training config path: {}'.format(args.config))
-    print('Model config path: {}'.format(args.model_config))
-    print('Debug mode: {}'.format(args.debug))
+    print('==> Training config path: {}'.format(args.config))
+    print('==> Model config path: {}'.format(args.model_config))
+    print('==> Debug mode: {}'.format(args.debug))
 
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu_id)
-    print(f"Using GPU {os.environ['CUDA_VISIBLE_DEVICES']}")
+    print(f"==> GPU ID: {os.environ['CUDA_VISIBLE_DEVICES']}")
 
     resume_filename = None
     if args.resume is not None:
         resume_filename = args.resume
-        print("Resuming From {}".format(resume_filename))
+        print("==> Resuming From {}".format(resume_filename))
         saved_state_dict = torch.load(resume_filename)
         params = saved_state_dict['params']
     else:
         params = TrainingParams(args.config, args.model_config, debug=args.debug)
         saved_state_dict = None
 
-    params.print()
+    # params.print()
 
     if args.debug:
         torch.autograd.set_detect_anomaly(True)
     
-    # Create folder
     current_time = time.strftime("%Y%m%d_%H%M")
     model_name = f"{current_time}_{params.model_name}"
     dataset_name = params.train_file.replace('.pickle', '')

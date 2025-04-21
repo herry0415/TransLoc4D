@@ -39,13 +39,16 @@ class ModelParams:
         elif "cartesian" in self.coordinates:
             # Single quantization step for cartesian coordinates
             self.quantization_step = params.getfloat("quantization_step")
-            self.quantizer = CartesianQuantizer(quant_step=self.quantization_step)
+            self.quantizer = CartesianQuantizer(
+                quant_step=self.quantization_step)
         else:
-            raise NotImplementedError(f"Unsupported coordinates: {self.coordinates}")
+            raise NotImplementedError(
+                f"Unsupported coordinates: {self.coordinates}")
 
         # Use cosine similarity instead of Euclidean distance
         # When Euclidean distance is used, embedding normalization is optional
-        self.normalize_embeddings = params.getboolean("normalize_embeddings", False)
+        self.normalize_embeddings = params.getboolean(
+            "normalize_embeddings", False)
 
         # Size of the local features from backbone network (only for MinkNet based models)
         self.feature_size = params.getint("feature_size", 256)
@@ -70,7 +73,7 @@ class ModelParams:
 
         self.num_clusters = params.get("num_clusters", "8")
         self.use_sparse_tensor = params.getboolean("use_sparse_tensor", True)
-        
+
         if self.model == "TransLoc3d":
             self.conv0_out_channels = params.getint("conv0_out_channels", 64)
             self.conv0_kernel_size = params.getint("conv0_kernel_size", 5)
@@ -89,7 +92,7 @@ class ModelParams:
                 self.num_centers = tuple([256, 128, 128, 64, 64, 64])
             self.num_heads = params.getint("num_heads", 2)
             self.out_channels = params.getint("out_channels", 512)
-            
+
     def print(self):
         print("Model parameters:")
         param_dict = vars(self)
@@ -106,7 +109,6 @@ class ModelParams:
                 print("{}: {}".format(e, param_dict[e]))
 
         print("")
-
 
 
 class TrainingParams:
@@ -139,8 +141,14 @@ class TrainingParams:
 
         params = config["TRAIN"]
         self.save_freq = params.getint(
-            "save_freq", 0
+            "save_freq", 2
         )  # Model saving frequency (in epochs)
+        self.save_from = params.getint(
+            "save_from", 100
+        )  # Save model from this epoch
+        self.save_milestones = [int(e)
+                                for e in params.get("save_milestones", [25, 50, 75, 125]).split(",")]
+
         self.num_workers = params.getint("num_workers", 0)
 
         # Initial batch size for global descriptors (for both main and secondary dataset)
@@ -157,7 +165,8 @@ class TrainingParams:
             ), "batch_expansion_th must be between 0 and 1"
             self.batch_size_limit = params.getint("batch_size_limit", 256)
             # Batch size expansion rate
-            self.batch_expansion_rate = params.getfloat("batch_expansion_rate", 1.5)
+            self.batch_expansion_rate = params.getfloat(
+                "batch_expansion_rate", 1.5)
             assert (
                 self.batch_expansion_rate > 1.0
             ), "batch_expansion_rate must be greater than 1"
@@ -165,7 +174,8 @@ class TrainingParams:
             self.batch_size_limit = self.batch_size
             self.batch_expansion_rate = None
 
-        self.val_batch_size = params.getint("val_batch_size", self.batch_size_limit)
+        self.val_batch_size = params.getint(
+            "val_batch_size", self.batch_size_limit)
 
         self.lr = params.getfloat("lr", 1e-3)
         self.epochs = params.getint("epochs", 20)
@@ -193,7 +203,8 @@ class TrainingParams:
             self.pos_margin = params.getfloat("pos_margin", 0.2)
             self.neg_margin = params.getfloat("neg_margin", 0.65)
         elif "triplet" in self.loss:
-            self.margin = params.getfloat("margin", 0.4)  # Margin used in loss function
+            # Margin used in loss function
+            self.margin = params.getfloat("margin", 0.4)
         elif self.loss == "truncatedsmoothap":
             # Number of best positives (closest to the query) to consider
             self.positives_per_query = params.getint("positives_per_query", 4)
@@ -207,7 +218,8 @@ class TrainingParams:
         self.similarity = params.get("similarity", "euclidean")
         assert self.similarity in ["cosine", "euclidean"]
 
-        self.aug_mode = params.getint("aug_mode", 1)  # Augmentation mode (1 is default)
+        # Augmentation mode (1 is default)
+        self.aug_mode = params.getint("aug_mode", 1)
         self.set_aug_mode = params.getint(
             "set_aug_mode", 1
         )  # Augmentation mode (1 is default)

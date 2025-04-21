@@ -67,14 +67,15 @@ class BatchSampler(Sampler):
 
         self.batch_idx = []     # Index of elements in each batch (re-generated every epoch)
         self.elems_ndx = list(self.dataset.queries)    # List of point cloud indexes
+        self.generate_batches()  # Generate batches for the first time
 
     def __iter__(self):
-        # Re-generate batches every epoch
-        self.generate_batches()
         for batch in self.batch_idx:
             yield batch
+        # Re-generate batches every epoch
+        self.generate_batches()
 
-    def __len(self):
+    def __len__(self):
         return len(self.batch_idx)
 
     def expand_batch(self):

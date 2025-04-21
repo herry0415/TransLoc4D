@@ -22,6 +22,7 @@ class WholeDataset(data.Dataset):
         mode="test",
     ):
         super().__init__()
+        print(f"==> Loading dataset from {database_pickle} and {query_pickle}")
         self.split = split
         self.pc_loader = Rad4DPointCloudLoader()
         self.database = self.load_pickle(database_pickle)
@@ -64,7 +65,7 @@ class WholeDataset(data.Dataset):
             # self.queries_positives.append(positives)
             self.queries_nonnegatives.append(non_negatives)
 
-        print(f"==> Queries: {len(self.queries_nonnegatives)} valid queries")
+        print(f"  Queries: {len(self.queries_nonnegatives)} valid queries")
 
     def construct_database(self, df_db):
         self.database_id = []
@@ -75,7 +76,7 @@ class WholeDataset(data.Dataset):
             scan_filename = df_db[idx]["file"]
             self.database_pc_file.append(scan_filename)
 
-        print(f"==> Database: {len(self.database_pc_file)} references")
+        print(f"  Database: {len(self.database_pc_file)} references")
 
     def __len__(self):
         return len(self.wholedataset_pc_file)
