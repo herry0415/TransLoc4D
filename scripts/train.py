@@ -266,7 +266,7 @@ def do_train(params: TrainingParams, model_name, weights_folder, resume_filename
     # Initialize TensorBoard writer using weights_folder as log directory.
     writer = SummaryWriter(log_dir=weights_folder)
 
-    for epoch in tqdm.tqdm(range(start_epoch + 1, params.epochs + 1), desc="==> Training Epoch", unit="epoch", leave=False):
+    for epoch in tqdm.tqdm(range(start_epoch + 1, params.epochs + 1), desc="==> Training Epoch", unit="epoch", leave=False, position=0):
         metrics = {'epoch': epoch, 'train': {}, 'val': {}}
         current_val_recall = 0
         tqdm.tqdm.write(f">> epoch: {epoch}, lr: {optimizer.param_groups[0]['lr']}:", end=' ')
@@ -281,7 +281,7 @@ def do_train(params: TrainingParams, model_name, weights_folder, resume_filename
         except TypeError:
             total_batches = None
         global_iter = iter(data_loader)
-        with tqdm.tqdm(total=total_batches, desc=f"===> Batches", unit="batch", leave=False) as pbar:
+        with tqdm.tqdm(total=total_batches, desc=f"===> Batches", unit="batch", leave=False, position=1) as pbar:
             count_batches = 0
             while True:
                 count_batches += 1

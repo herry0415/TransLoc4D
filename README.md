@@ -30,17 +30,26 @@ Alternatively, perform a manual installation as follows:
    ```
 
 ## Datasets and Model Weights
+
+## NTU4DPR+SJTU4DPR
 The datasets used in this study (dynamic points removed with velocity) can be found [here](https://entuedu-my.sharepoint.com/:f:/g/personal/heshan001_e_ntu_edu_sg/EtDhy41KPAFFqTD6wb9-1EABl-bXqnez8HXFRJgIPOJosg?e=IRzzft), and model weights trained on the NTU dataset are available [here](https://entuedu-my.sharepoint.com/:f:/g/personal/heshan001_e_ntu_edu_sg/EpNaXwtTW99KghTTzrkbisEBQX5wDyVvmIjRBQZF8e7_Kg?e=55Qpup).
 
+
 ### Model Performance
+Model trained on `NTU4DPR`.
 
 | Test Set     | nyl-night | nyl-rain | src-night | sjtu4dpr-testa | sjtu4dpr-testb |
 | ------------ | --------- | -------- | --------- | -------------- | -------------- |
 | Recall@1 (%) | 97.1      | 86.8     | 94.5      | 90.8           | 85.9           |
 
 
+## [SNAIL-RADAR](https://snail-radar.github.io/)
+To prepare the dataset please refer to [here](scripts/snail-radar/README.md).
+
+
 
 ## Usage
+### NTU4DPR+SJTU4DPR
 To prepare datasets for training and evaluation, run the following scripts:
 - For training set generation, modify path and config in `scripts/generate_trainset.py` and then run: 
   ```
@@ -50,6 +59,9 @@ To prepare datasets for training and evaluation, run the following scripts:
   ```
   python scripts/generate_testsets.py
   ```
+
+### [SNAIL-RADAR](https://snail-radar.github.io/)
+Please refer to [here](scripts/snail-radar/README.md#generate-pickles-files) for details.
 
 ### Running Evaluation and Training
 #### Evaluation
@@ -62,6 +74,15 @@ python scripts/eval.py --database_pickle "/path/to/database_pickle" --query_pick
 - `--query_pickle`: Path to the query pickle file.
 - `--model_config`: Path to the model-specific configuration file.
 - `--weights`: Path to the trained model weights.
+
+#### Batch Evaluation
+To evaluate multiple test sets/weights at once, use the command:
+```
+python scripts/batch_eval.py --config_path "config/eval/snail.json"
+```
+
+**Parameters:**
+- `--config_path`: Path to the configuration file for tests.
 
 #### Training
 To train the model, run the following command:

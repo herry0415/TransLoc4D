@@ -2,7 +2,7 @@
 dataset_folder = /datasets/snail-radar_tl4d
 
 [TRAIN]
-num_workers = 0
+num_workers = 8
 # 2048, 1536
 batch_size = 768
 # 128, 96

@@ -22,5 +22,5 @@ save_from = 100
 save_milestones = 25, 50, 75, 125
 
 train_file = train_queries_ntu-rsvi.pickle
-val_query = ntu-rsvi_val_evaluation_query_25.pickle
-val_database = ntu-rsvi_val_evaluation_database_25.pickle
+val_query = nyl-night-rsvi_test_evaluation_query_25.pickle
+val_database = nyl-night-rsvi_test_evaluation_database_25.pickle
