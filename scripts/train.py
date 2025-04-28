@@ -65,8 +65,6 @@ def get_global_stats(phase, stats):
         s += f"#positives per query: {stats['positives_per_query']:.1f}   "
     if 'best_positive_ranking' in stats and int(stats['best_positive_ranking']) != 0:
         s += f"best positive rank: {stats['best_positive_ranking']:.1f}   "
-    if 'recall' in stats and stats['recall'][1] >= 1:
-        s += f"Recall@1: {stats['recall'][1]:.4f}   "
     if 'ap' in stats:
         s += f"AP: {stats['ap']:.4f}   "
 
@@ -265,11 +263,19 @@ def do_train(params: TrainingParams, model_name, weights_folder, resume_filename
     
     # Initialize TensorBoard writer using weights_folder as log directory.
     writer = SummaryWriter(log_dir=weights_folder)
+    outer = tqdm.tqdm(
+        range(start_epoch + 1, params.epochs + 1),
+        desc="==> Training Epoch",
+        unit="epoch",
+        leave=False,
+        position=0,
+        dynamic_ncols=True
+    )
 
-    for epoch in tqdm.tqdm(range(start_epoch + 1, params.epochs + 1), desc="==> Training Epoch", unit="epoch", leave=False, position=0):
+    for epoch in outer:
         metrics = {'epoch': epoch, 'train': {}, 'val': {}}
         current_val_recall = 0
-        tqdm.tqdm.write(f">> epoch: {epoch}, lr: {optimizer.param_groups[0]['lr']}:", end=' ')
+        outer.write(f">> epoch: {epoch}, lr: {optimizer.param_groups[0]['lr']}")
 
         # Training phase
         phase = 'train'
@@ -281,7 +287,7 @@ def do_train(params: TrainingParams, model_name, weights_folder, resume_filename
         except TypeError:
             total_batches = None
         global_iter = iter(data_loader)
-        with tqdm.tqdm(total=total_batches, desc=f"===> Batches", unit="batch", leave=False, position=1) as pbar:
+        with tqdm.tqdm(total=total_batches, desc=f"===> Batches", unit="batch", leave=False, position=1, dynamic_ncols=True) as pbar:
             count_batches = 0
             while True:
                 count_batches += 1
@@ -310,7 +316,7 @@ def do_train(params: TrainingParams, model_name, weights_folder, resume_filename
         stats[phase].append(epoch_stats)
         stat_string = get_stats(phase, epoch_stats)
 
-        tqdm.tqdm.write(f"    {stat_string}")
+        outer.write(f"    {stat_string}")
 
         metrics[phase]['loss1'] = epoch_stats['global']['loss']
         if 'num_non_zero_triplets' in epoch_stats['global']:
@@ -332,7 +338,7 @@ def do_train(params: TrainingParams, model_name, weights_folder, resume_filename
             phase = 'val'
             model.eval()
             recall_metrics = evaluate_4drad_dataset(model, device, val_set, params)
-            tqdm.tqdm.write(f"    Valset: Recall@1: {recall_metrics[1]:.4f}, Recall@5: {recall_metrics[5]:.4f}, Recall@10: {recall_metrics[10]:.4f}")
+            outer.write(f"    Valset: Recall@1: {recall_metrics[1]:.4f}, Recall@5: {recall_metrics[5]:.4f}, Recall@10: {recall_metrics[10]:.4f}")
             metrics[phase][f'{test_database_name}--{test_query_name}'] = {
                 'r@1': recall_metrics[1],
                 'r@5': recall_metrics[5],
@@ -363,7 +369,7 @@ def do_train(params: TrainingParams, model_name, weights_folder, resume_filename
                         "epoch": epoch
                     }
                     torch.save(checkpoint, final_model_path)
-                    tqdm.tqdm.write(f"    @@@@ Saved model with val_recall@1 {current_val_recall:.4f} @@@")
+                    outer.write(f"    @@@@ Saved model with val_recall@1 {current_val_recall:.4f} @@@")
                     model_n = os.path.basename(final_model_path).split('.')[0]
                     result_dir = os.path.dirname(final_model_path)
                     save_recall_results(model_n, f"{test_database_name}_{test_query_name}", recall_metrics, result_dir)
@@ -380,7 +386,6 @@ def do_train(params: TrainingParams, model_name, weights_folder, resume_filename
             json.dump(train_metrics, f, indent=4)
         
         writer.add_scalar("train/loss1", metrics['train']['loss1'], epoch)
-        writer.add_scalar("train/recall@1", metrics['train']['recall@1'], epoch)
         # Log validation recall only when testing is performed.
         if f'{test_database_name}--{test_query_name}' in metrics['val']:
             writer.add_scalar("val/recall@1", metrics['val'][f'{test_database_name}--{test_query_name}']['r@1'], epoch)

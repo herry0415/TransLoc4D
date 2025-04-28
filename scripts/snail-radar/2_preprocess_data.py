@@ -118,7 +118,7 @@ def main():
                     logging.error(f"Failed to create directory {datasets_root}: {e}")
                     continue
 
-            command = [sys.executable, preprocess_script, "--dataset_root", datasets_root]
+            command = [sys.executable, preprocess_script, "--dataset_root", datasets_root, "--gps_ori_rel_path", "utm50r_T_x36dimu.txt"]
             try:
                 result = subprocess.run(
                     command,

@@ -9,6 +9,7 @@ import utm
 import bisect
 from multiprocessing import Pool
 import shutil
+from scipy.spatial.transform import Rotation as R
 
 from transloc4d.datasets import estimate_ego_vel
 
@@ -78,6 +79,63 @@ def find_closest_gps(gps_entries, target_time):
         return before
     else:
         return after
+
+def parse_gps_ori_file(gps_ori_file_path):
+    """
+    Parse the GPS orientation file (with quaternion) and return a sorted list of tuples:
+    (time, qx, qy, qz, qw).
+    """
+    ori_entries = []
+    with open(gps_ori_file_path, 'r') as f:
+        for line in f:
+            line = line.strip()
+            # skip header/comment lines
+            if not line or line.startswith('#'):
+                continue
+            parts = line.split(',')
+            # expecting at least: timestamp, easting, northing, up, qx, qy, qz, qw, ...
+            if len(parts) < 8:
+                continue
+            try:
+                ori_time = float(parts[0])
+                qx = float(parts[4])
+                qy = float(parts[5])
+                qz = float(parts[6])
+                qw = float(parts[7])
+                ori_entries.append((ori_time, qx, qy, qz, qw))
+            except ValueError:
+                continue
+    ori_entries.sort(key=lambda x: x[0])
+    return ori_entries
+
+
+def find_closest_ori(ori_entries, target_time):
+    """
+    Find the orientation entry with the timestamp closest to target_time using binary search.
+    """
+    times = [entry[0] for entry in ori_entries]
+    pos = bisect.bisect_left(times, target_time)
+    if pos == 0:
+        return ori_entries[0]
+    if pos == len(times):
+        return ori_entries[-1]
+    before = ori_entries[pos - 1]
+    after = ori_entries[pos]
+    if abs(before[0] - target_time) <= abs(after[0] - target_time):
+        return before
+    else:
+        return after
+
+
+def quaternion_to_euler(qx, qy, qz, qw):
+    """
+    Convert quaternion (qx, qy, qz, qw) to roll, pitch, yaw angles (in radians) using scipy.
+    """
+    rot = R.from_quat([qx, qy, qz, qw])
+    roll, pitch, yaw = rot.as_euler('xyz', degrees=False)
+    return roll, pitch, yaw
+
+# --- end new utilities ---
 
 
 def find_closest_image(sorted_image_entries, target_time):
@@ -151,14 +209,22 @@ def process_single_pcd(task):
       - Extracts the needed fields.
       - Optionally estimates ego velocity.
       - Normalizes the xyz coordinates and resamples the point cloud to a fixed number of points.
+      - Filters out scans with fewer than 10 unique xyz points.
       - Saves the processed point cloud as a .npy file.
       - If image generation is enabled, finds the closest image using find_closest_image
         and copies it to a new folder with the new timestamp.
-      - Returns a tuple (processed_timestamp, northing, easting) for GPS synchronization.
+      - Returns a tuple for GPS (and optionally orientation) synchronization.
     """
-    (pcd_file, radar_folder, save_pointclouds_folder, gps_entries,
-     generate_original, generate_images, image_folder, sorted_image_entries,
-     target_points) = task
+    (pcd_file,
+     radar_folder,
+     save_pointclouds_folder,
+     gps_entries,
+     generate_original,
+     generate_images,
+     image_folder,
+     sorted_image_entries,
+     target_points,
+     ori_entries) = task
 
     msg = ""
     raw_timestamp = pcd_file[:-4]  # remove ".pcd"
@@ -192,6 +258,12 @@ def process_single_pcd(task):
     processed_scan = resample_pointcloud(
         processed_scan, target_size=target_points)
 
+    # Filter out scans with fewer than 10 unique xyz points
+    unique_xyz = np.unique(processed_scan[:, :3], axis=0)
+    if unique_xyz.shape[0] < 10:
+        msg = f"Filtered: only {unique_xyz.shape[0]} unique points in {pcd_file}"
+        return None, msg
+
     # Save processed point cloud as .npy file.
     npy_save_path = join(save_pointclouds_folder, f"{processed_timestamp}.npy")
     np.save(npy_save_path, processed_scan)
@@ -199,12 +271,22 @@ def process_single_pcd(task):
         npy_save_path_original = join(
             save_pointclouds_folder, f"{processed_timestamp}_org.npy")
         np.save(npy_save_path_original, radar_scan)
+
     # GPS synchronization.
     target_time = float(raw_timestamp)
     closest_gps = find_closest_gps(gps_entries, target_time)
     lat, lon = closest_gps[1], closest_gps[2]
     utm_result = utm.from_latlon(lat, lon)
     easting, northing = utm_result[0], utm_result[1]
+
+    # Orientation synchronization (if provided)
+    if ori_entries:
+        closest_ori = find_closest_ori(ori_entries, target_time)
+        _, qx, qy, qz, qw = closest_ori
+        roll, pitch, yaw = quaternion_to_euler(qx, qy, qz, qw)
+        gps_orient_tuple = (processed_timestamp, northing, easting, roll, pitch, yaw)
+    else:
+        gps_orient_tuple = (processed_timestamp, northing, easting)
 
     # If image generation is enabled, find and copy the closest image.
     if generate_images and image_folder and sorted_image_entries:
@@ -222,7 +304,7 @@ def process_single_pcd(task):
         except Exception as e:
             msg += f"\nWarning: Failed to process image for {pcd_file}: {e}"
 
-    return (processed_timestamp, northing, easting), msg
+    return gps_orient_tuple, msg
 
 
 def get_args():
@@ -235,6 +317,8 @@ def get_args():
                         help="Relative path to radar .pcd files")
     parser.add_argument("--gps_rel_path", type=str, default="x36d/gnss_ins.txt",
                         help="Relative path to GPS file")
+    parser.add_argument("--gps_ori_rel_path", type=str, default=None,
+                        help="Relative path to GPS orientation TXT file (quaternion data)")
     parser.add_argument("--img_rel_path", type=str, default="zed2i/left",
                         help="Relative path to image camera image files")
     parser.add_argument("--save_folder", type=str, default=None,
@@ -258,8 +342,16 @@ def main():
     os.makedirs(args.save_folder, exist_ok=True)
     save_pointclouds_folder = join(args.save_folder, "pointclouds")
     os.makedirs(save_pointclouds_folder, exist_ok=True)
+
     # Load and sort GPS data.
     gps_entries = parse_gps_file(gps_file_path)
+
+    # Load and sort GPS orientation data if requested.
+    if args.gps_ori_rel_path:
+        gps_ori_file_path = join(args.dataset_root, args.gps_ori_rel_path)
+        ori_entries = parse_gps_ori_file(gps_ori_file_path)
+    else:
+        ori_entries = None
 
     # Build tasks list.
     pcd_files = [f for f in os.listdir(radar_folder) if f.endswith('.pcd')]
@@ -283,25 +375,39 @@ def main():
 
     tasks = []
     for pcd_file in pcd_files:
-        tasks.append((pcd_file, radar_folder, save_pointclouds_folder,
-                      gps_entries, args.generate_original, args.generate_images,
-                      image_folder, sorted_image_entries, args.target_points))
+        tasks.append((
+            pcd_file,
+            radar_folder,
+            save_pointclouds_folder,
+            gps_entries,
+            args.generate_original,
+            args.generate_images,
+            image_folder,
+            sorted_image_entries,
+            args.target_points,
+            ori_entries
+        ))
 
     results = []
     with Pool() as pool:
-        for res, msg in tqdm(pool.imap_unordered(process_single_pcd, tasks, chunksize=10),
-                             total=len(tasks), desc="Processing PCD files"):
+        for res, msg in tqdm(pool.imap_unordered(
+                process_single_pcd, tasks, chunksize=10),
+                total=len(tasks), desc="Processing PCD files"):
             if msg:
                 tqdm.write(msg)
             if res is not None:
                 results.append(res)
 
     results.sort(key=lambda x: int(x[0]))
-    # Save GPS synchronization data.
+
+    # Save GPS (and orientation) synchronization data.
     gps_csv_path = join(args.save_folder, "gps.csv")
     with open(gps_csv_path, "w", newline="") as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow(["timestamp", "northing", "easting"])
+        if args.gps_ori_rel_path:
+            writer.writerow(["timestamp", "northing", "easting", "roll", "pitch", "yaw"])
+        else:
+            writer.writerow(["timestamp", "northing", "easting"])
         writer.writerows(results)
 
 

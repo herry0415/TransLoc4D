@@ -7,19 +7,22 @@ from transloc4d.datasets import build_training_pickle, build_test_pickles
 train_config = {
     "dataset_name": "snail",
     "ind_pos_r": 9,
-    "ind_nonneg_r": 18
+    "ind_nonneg_r": 18,
+    "angle_threshold_deg": 75
 }
 
 test_configs = [
     {
         "datasets_name": ["snail"],
         "subsets": ["val"],
-        "valDist": 9
+        "valDist": 9,
+        "angle_threshold_deg": 30
     },
     {
         "datasets_name": ["bc", "sl", "ss", "if", "iaf", "iaef", "st", "81r"],
         "subsets": ["test"],
-        "valDist": 9
+        "valDist": 9,
+        "angle_threshold_deg": 30
     }
 ]
 
@@ -37,12 +40,13 @@ if __name__ == '__main__':
     # Generate training pickle
     tqdm.write("Building training pickle...")
     build_training_pickle(args.base_path, train_config["dataset_name"],
-                          ind_pos_r=train_config["ind_pos_r"], ind_nonneg_r=train_config["ind_nonneg_r"])
+                          ind_pos_r=train_config["ind_pos_r"], ind_nonneg_r=train_config["ind_nonneg_r"], angle_threshold_deg=train_config["angle_threshold_deg"], print_func=tqdm.write)
 
     for config in tqdm(test_configs, desc="Building test pickles...", position=0, leave=False):
         datasets_name = config["datasets_name"]
         subsets = config["subsets"]
         valDist = config.get("valDist", 25)
+        angle_threshold_deg = config.get("angle_threshold_deg", 30)
 
         # Construct and save the query and database sets
-        build_test_pickles(args.base_path, datasets_name, subsets, valDist=valDist, print_func=tqdm.write)
+        build_test_pickles(args.base_path, datasets_name, subsets, valDist=valDist, angle_threshold_deg=angle_threshold_deg, print_func=tqdm.write)

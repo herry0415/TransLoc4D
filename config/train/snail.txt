@@ -2,9 +2,9 @@
 dataset_folder = /datasets/snail-radar_tl4d
 
 [TRAIN]
-num_workers = 8
+num_workers = 12
 # 2048, 1536
-batch_size = 768
+batch_size = 2048
 # 128, 96
 batch_split_size = 64
 val_batch_size = 96
@@ -18,9 +18,9 @@ loss = TruncatedSmoothAP
 tau1 = 0.01
 positives_per_query = 4
 save_freq = 2
-save_from = 10
+save_from = 20
 save_milestones = 1, 5, 10, 25, 50, 75, 125
 
-train_file = train_queries_snail.pickle
-val_query = snail_val_evaluation_query_9.pickle
-val_database =  snail_val_evaluation_database_9.pickle
+train_file = train_queries_snail_pos10_nonneg50_75.pickle
+val_query = snail_val_evaluation_query_9_30.pickle
+val_database =  snail_val_evaluation_database_9_30.pickle

@@ -5,6 +5,8 @@ To use [SNAIL-RADAR](https://snail-radar.github.io/) in this repository, please 
 ## Download
 Download the original dataset from [SNAIL-RADAR](https://snail-radar.github.io/).
 
+Make sure `ref_trajs.zip` is downloaded for headings.
+
 ## Extract data
 Run below command to extract data to specific folder, where `-s` is the base directory for source `zip` files, and `-d` is the destination directory for extracted files. 
 

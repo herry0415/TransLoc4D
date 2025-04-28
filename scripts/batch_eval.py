@@ -15,13 +15,14 @@ def run_evaluation(task, gpu_id):
     datasets = task['datasets']
     weights_paths = task['weights_paths']
     posDist = task.get('posDist', 25)
+    posHeading = task.get('posHeading', None)
     model_config = task.get('model_config', None)
     config = task.get('config', None)
     dataset_root = task.get('dataset_root', '/home/user/datasets')
     
     for dataset in datasets:
-        database_pickle = join(dataset_root, f'{dataset}_evaluation_database_{posDist}.pickle')
-        query_pickle = join(dataset_root, f'{dataset}_evaluation_query_{posDist}.pickle')
+        database_pickle = join(dataset_root, f'{dataset}_evaluation_database_{posDist}_{posHeading}.pickle' if posHeading else f'{dataset}_evaluation_database_{posDist}.pickle')
+        query_pickle = join(dataset_root, f'{dataset}_evaluation_query_{posDist}_{posHeading}.pickle' if posHeading else f'{dataset}_evaluation_query_{posDist}.pickle')
         
         for weights_path in weights_paths:
             command = [

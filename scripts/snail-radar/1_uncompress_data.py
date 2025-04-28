@@ -8,11 +8,12 @@ For each date_run:
     - A folder name is created as {date_part}_{run_part}.
     - It assumes that a source ZIP file exists at:
           {SOURCE_DIR}/{date_part}/data{run_part}.zip
-    - The ZIP file is extracted into:
+    - A single ref_trajs.zip lives at:
+          {SOURCE_DIR}/ref_trajs.zip
+      containing folders like YYYYMMDD/data<run>/...
+    - The main ZIP is filtered by KEPT_FOLDERS; ref_trajs.zip is **not** filtered.
+    - All relevant files are extracted into:
           {DEST_DIR}/{place_setup}/{date_part}_{run_part}
-
-A variable 'KEPT_FOLDERS' is defined to restrict extraction based on regular expression patterns.
-Only files matching at least one pattern will be extracted. If KEPT_FOLDERS is empty, all files will be extracted.
 """
 
 import os
@@ -20,6 +21,7 @@ import re
 import zipfile
 import argparse
 from tqdm import tqdm
+import shutil  # for copying from ref_trajs.zip
 
 # Specify regular expression pattern(s) to keep files from within each ZIP file.
 # If the list is empty, all files in the ZIP are extracted.
@@ -102,24 +104,34 @@ def process_data(source_dir, dest_dir):
     Only files whose names match the regular expression patterns specified in KEPT_FOLDERS
     are extracted. If KEPT_FOLDERS is empty, all files are extracted.
 
+    Additionally, if a global ref_trajs.zip exists under source_dir, any entries under
+    YYYYMMDD/data<run>/ within it will also be extracted to the same destination.
     Parameters:
         source_dir (str): Base directory for source ZIP files.
         dest_dir (str): Base directory for extracted files.
     """
+    # Open global ref_trajs.zip once (if it exists)
+    ref_zip_path = os.path.join(source_dir, "ref_trajs.zip")
+    if os.path.isfile(ref_zip_path):
+        ref_zip = zipfile.ZipFile(ref_zip_path, "r")
+        ref_members = [m for m in ref_zip.infolist() if not m.is_dir()]
+    else:
+        ref_zip = None
+        print(f"Note: no ref_trajs.zip found at {ref_zip_path}")
+
     for group, date_runs in data_dict.items():
         group_dest_dir = os.path.join(dest_dir, group)
         os.makedirs(group_dest_dir, exist_ok=True)
+
         for date_run in date_runs:
             # Validate the date_run format.
             if "/" not in date_run:
-                print(
-                    f"WARNING: Invalid date_run format '{date_run}' in group '{group}'. Skipping.")
+                print(f"WARNING: Invalid date_run format '{date_run}' in group '{group}'. Skipping.")
                 continue
 
             date_part, run_part = date_run.split("/", 1)
             folder_name = f"{date_part}_{run_part}"
-            src_zip = os.path.join(source_dir, date_part,
-                                   f"data{run_part}.zip")
+            src_zip = os.path.join(source_dir, date_part, f"data{run_part}.zip")
             dest_folder = os.path.join(group_dest_dir, folder_name)
 
             if os.path.exists(src_zip):
@@ -136,8 +148,8 @@ def process_data(source_dir, dest_dir):
                         # If KEPT_FOLDERS contains regex patterns, filter based on those.
                         if KEPT_FOLDERS:
                             filtered_members = [
-                                member for member in members
-                                if any(re.search(pattern, member.filename) for pattern in KEPT_FOLDERS)
+                                m for m in members
+                                if any(re.search(pattern, m.filename) for pattern in KEPT_FOLDERS)
                             ]
                         else:
                             filtered_members = members
@@ -145,12 +157,32 @@ def process_data(source_dir, dest_dir):
                         for member in tqdm(filtered_members, desc="Extracting", unit="file", total=len(filtered_members)):
                             zip_ref.extract(member, dest_folder)
                     print("  Unzipped successfully.")
+
+                    # --- New: extract all from global ref_trajs.zip ---
+                    if ref_zip:
+                        prefix = f"{date_part}/data{run_part}/"
+                        trajs = [m for m in ref_members if m.filename.startswith(prefix)]
+                        if trajs:
+                            print("  Extracting trajectories from ref_trajs.zip...")
+                            for traj in tqdm(trajs, desc="Trajectories", unit="file", total=len(trajs)):
+                                rel_path = traj.filename[len(prefix):]
+                                out_path = os.path.join(dest_folder, rel_path)
+                                os.makedirs(os.path.dirname(out_path), exist_ok=True)
+                                with ref_zip.open(traj) as src_f, open(out_path, "wb") as dst_f:
+                                    shutil.copyfileobj(src_f, dst_f)
+                            print("  Trajectories extracted successfully.")
+                        else:
+                            print(f"  (no trajectories found for prefix '{prefix}')")
+
                 except Exception as e:
                     print(f"  ERROR: Failed to unzip {src_zip}: {e}")
             else:
                 print(f"  WARNING: Source file {src_zip} does not exist.")
 
             print("-" * 50)
+
+    if ref_zip:
+        ref_zip.close()
 
 
 def main():
