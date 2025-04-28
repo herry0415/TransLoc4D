@@ -2,7 +2,7 @@
 dataset_folder = /home/user/datasets
 
 [TRAIN]
-num_workers = 0
+num_workers = 12
 # 2048, 1536
 batch_size = 768
 # 128, 96

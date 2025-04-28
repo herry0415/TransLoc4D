@@ -43,11 +43,6 @@ def load_dataframe(base_path, dataset_name, subset, data_type):
 
 def construct_query_dict(df_query, df_db, base_path, filename, ind_pos_r=10, ind_nonneg_r=50):
     df_combined = pd.concat([df_query, df_db]).reset_index(drop=True)
-    tree_db2q = KDTree(df_query[['northing', 'easting']])
-    ind_positive_db2q = tree_db2q.query_radius(df_combined[['northing', 'easting']], r=ind_pos_r)
-
-    tree_q2db = KDTree(df_db[['northing', 'easting']])
-    ind_positive_q2db = tree_q2db.query_radius(df_query[['northing', 'easting']], r=ind_pos_r)
 
     tree_combined = KDTree(df_combined[['northing', 'easting']])
     ind_positive = tree_combined.query_radius(df_combined[['northing', 'easting']], r=ind_pos_r)
@@ -59,19 +54,13 @@ def construct_query_dict(df_query, df_db, base_path, filename, ind_pos_r=10, ind
         if len(positives)==0 or len(non_negatives)==0:
             continue
         
-        if anchor_ndx < len(df_query):
-            positives_for_train = ind_positive_q2db[anchor_ndx]
-            positives_for_train = [i+len(df_query) for i in positives_for_train]
-        else:
-            positives_for_train = ind_positive_db2q[anchor_ndx]
-        
         anchor_pos = np.array(df_combined.iloc[anchor_ndx][['northing', 'easting']])
         timestamp = df_combined.iloc[anchor_ndx]["timestamp"]
         scan_filename = df_combined.iloc[anchor_ndx]["file"]
         assert os.path.isfile(scan_filename), 'point cloud file {} is found'.format(scan_filename)
 
         # Sort ascending order
-        positives_for_train = np.sort(positives_for_train)
+        positives = np.sort(positives)
         non_negatives = np.sort(non_negatives)
 
  
@@ -80,7 +69,7 @@ def construct_query_dict(df_query, df_db, base_path, filename, ind_pos_r=10, ind
             id=anchor_ndx,
             timestamp=timestamp,
             rel_scan_filepath=scan_filename,
-            positives=positives_for_train,
+            positives=positives,
             non_negatives=non_negatives,
             position=anchor_pos
         )
