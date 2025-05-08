@@ -185,11 +185,15 @@ def do_train(params: TrainingParams, model_name, weights_folder, resume_filename
     else:
         device = "cpu"
 
-    val_set = WholeDataset(os.path.join(params.dataset_folder, params.test_database), os.path.join(params.dataset_folder, params.test_query))
-    
-    test_database_name = params.test_database.split('.')[0]
-    test_query_name = params.test_query.split('.')[0]
 
+    val_sets = [
+        {
+            "dataset": WholeDataset(os.path.join(params.dataset_folder, params.val_databases[i]), os.path.join(params.dataset_folder, params.val_queries[i])),
+            "database_name": params.val_databases[i],
+            "query_name": params.val_queries[i]
+        } for i in range(len(params.val_databases))
+    ]
+    
     # Create model class
     model = get_model(params, device, resume_filename)
 
@@ -337,42 +341,48 @@ def do_train(params: TrainingParams, model_name, weights_folder, resume_filename
         if (epoch > params.save_from and epoch % params.save_freq == 0) or epoch in params.save_milestones:
             phase = 'val'
             model.eval()
-            recall_metrics = evaluate_4drad_dataset(model, device, val_set, params)
-            outer.write(f"    Valset: Recall@1: {recall_metrics[1]:.4f}, Recall@5: {recall_metrics[5]:.4f}, Recall@10: {recall_metrics[10]:.4f}")
-            metrics[phase][f'{test_database_name}--{test_query_name}'] = {
-                'r@1': recall_metrics[1],
-                'r@5': recall_metrics[5],
-                'r@10': recall_metrics[10]
-            }
-            current_val_recall = recall_metrics[1]
-            if current_val_recall > train_metrics['best_r@1']:
-                train_metrics['best_r@1'] = current_val_recall
-                train_metrics['best_epoch'] = epoch
-                checkpoint = {
-                    "net": model.state_dict(),
-                    'optimizer': optimizer.state_dict(),
-                    'lr_schedule': scheduler.state_dict(),
-                    'params': params,
-                    "epoch": epoch
-                }
-                torch.save(checkpoint, 'model_best.pth')
 
-            model.eval()
-            with torch.no_grad():
-                if epoch > 2 or epoch == 1:
-                    final_model_path = "{}_epoch_{}".format(model_pathname, epoch) + '.pth'
-                    checkpoint = {
-                        "net": model.state_dict(),
-                        'optimizer': optimizer.state_dict(),
-                        'lr_schedule': scheduler.state_dict(),
-                        'params': params,
-                        "epoch": epoch
-                    }
-                    torch.save(checkpoint, final_model_path)
-                    outer.write(f"    @@@@ Saved model with val_recall@1 {current_val_recall:.4f} @@@")
-                    model_n = os.path.basename(final_model_path).split('.')[0]
-                    result_dir = os.path.dirname(final_model_path)
-                    save_recall_results(model_n, f"{test_database_name}_{test_query_name}", recall_metrics, result_dir)
+            final_model_path = "{}_epoch_{}".format(model_pathname, epoch) + '.pth'
+            checkpoint = {
+                "net": model.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'lr_schedule': scheduler.state_dict(),
+                'params': params,
+                "epoch": epoch
+            }
+            model_n = os.path.basename(final_model_path).split('.')[0]
+            result_dir = os.path.dirname(final_model_path)
+
+            for val_idx, val_set in enumerate(val_sets):
+                test_database_name = val_set['database_name']
+                test_query_name = val_set['query_name']
+
+                recall_metrics = evaluate_4drad_dataset(model, device, val_set['dataset'], params)
+                outer.write(f"    Valset {test_query_name}-{test_query_name}: Recall@1: {recall_metrics[1]:.4f}, Recall@5: {recall_metrics[5]:.4f}, Recall@10: {recall_metrics[10]:.4f}")
+                metrics[phase][f'{test_database_name}--{test_query_name}'] = {
+                    'r@1': recall_metrics[1],
+                    'r@5': recall_metrics[5],
+                    'r@10': recall_metrics[10]
+                }
+                if val_idx == 0:
+                    current_val_recall = recall_metrics[1]
+                    if current_val_recall > train_metrics['best_r@1']:
+                        train_metrics['best_r@1'] = current_val_recall
+                        train_metrics['best_epoch'] = epoch
+                        checkpoint = {
+                            "net": model.state_dict(),
+                            'optimizer': optimizer.state_dict(),
+                            'lr_schedule': scheduler.state_dict(),
+                            'params': params,
+                            "epoch": epoch
+                        }
+                        torch.save(checkpoint, os.path.join(weights_folder, 'model_best.pth'))
+
+                save_recall_results(model_n, f"{test_database_name}_{test_query_name}", recall_metrics, result_dir)
+
+
+            torch.save(checkpoint, final_model_path)
+            outer.write(f"    @@@@ Saved model with val_recall@1 {current_val_recall:.4f} @@@")
 
         if params.batch_expansion_th is not None:
             # Dynamic batch size expansion based on number of non-zero triplets
@@ -387,9 +397,11 @@ def do_train(params: TrainingParams, model_name, weights_folder, resume_filename
         
         writer.add_scalar("train/loss1", metrics['train']['loss1'], epoch)
         # Log validation recall only when testing is performed.
-        if f'{test_database_name}--{test_query_name}' in metrics['val']:
-            writer.add_scalar("val/recall@1", metrics['val'][f'{test_database_name}--{test_query_name}']['r@1'], epoch)
-            writer.add_scalar("val/recall@5", metrics['val'][f'{test_database_name}--{test_query_name}']['r@5'], epoch)
+        if len(metrics['val']) > 0:
+            for key, value in metrics['val'].items():
+                writer.add_scalar(f"val/{key}_r@1", value['r@1'], epoch)
+                writer.add_scalar(f"val/{key}_r@5", value['r@5'], epoch)
+                writer.add_scalar(f"val/{key}_r@10", value['r@10'], epoch)
 
     writer.close()  # Close the TensorBoard writer when training completes
 

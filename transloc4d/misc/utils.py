@@ -226,8 +226,14 @@ class TrainingParams:
         self.train_file = params.get("train_file")
         self.val_file = params.get("val_file", None)
         self.test_file = params.get("test_file", None)
-        self.test_query = params.get("val_query", None)
-        self.test_database = params.get("val_database", None)
+
+        self.val_queries = [
+            query_file.strip() for query_file in params.get("val_queries").split(",")
+        ]
+        self.val_databases = [
+            database_file.strip()
+            for database_file in params.get("val_databases").split(",")
+        ]
 
         # Read model parameters
         self.model_params = ModelParams(self.model_params_path)
