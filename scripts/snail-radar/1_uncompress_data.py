@@ -4,16 +4,17 @@ This script processes a dataset grouped by place_setup. Each key in the dictiona
 (e.g. "81r") and its value is a list of date_run strings (formatted as "YYYYMMDD/Run" or "YYYYMMDD_suffix/Run").
 
 For each date_run:
+    - It assumes that 
+        - A source ZIP file exists at:
+            {SOURCE_DIR}/{date_part}/data{run_part}.zip
+        - A single full_trajs.zip lives at:
+            {SOURCE_DIR}/full_trajs.zip
+        containing folders like YYYYMMDD/data<run>/...
+    - The source ZIP is filtered by KEPT_FOLDERS; full_trajs.zip is **not** filtered.
     - The date and run parts are extracted.
-    - A folder name is created as {date_part}_{run_part}.
-    - It assumes that a source ZIP file exists at:
-          {SOURCE_DIR}/{date_part}/data{run_part}.zip
-    - A single ref_trajs.zip lives at:
-          {SOURCE_DIR}/ref_trajs.zip
-      containing folders like YYYYMMDD/data<run>/...
-    - The main ZIP is filtered by KEPT_FOLDERS; ref_trajs.zip is **not** filtered.
     - All relevant files are extracted into:
           {DEST_DIR}/{place_setup}/{date_part}_{run_part}
+    - Calibration files are copied from the "calib" folder to the destination folder.
 """
 
 import os
@@ -21,7 +22,7 @@ import re
 import zipfile
 import argparse
 from tqdm import tqdm
-import shutil  # for copying from ref_trajs.zip
+import shutil
 
 # Specify regular expression pattern(s) to keep files from within each ZIP file.
 # If the list is empty, all files in the ZIP are extracted.
@@ -97,6 +98,10 @@ data_dict = {
 }
 
 
+calib_folder = os.path.join(os.path.abspath(os.path.dirname(__file__)), "calib")
+calib_files = [os.path.join(calib_folder, f) for f in os.listdir(calib_folder)]
+
+
 def process_data(source_dir, dest_dir):
     """
     Process each group in the data dictionary. For each date_run string in each group,
@@ -104,20 +109,19 @@ def process_data(source_dir, dest_dir):
     Only files whose names match the regular expression patterns specified in KEPT_FOLDERS
     are extracted. If KEPT_FOLDERS is empty, all files are extracted.
 
-    Additionally, if a global ref_trajs.zip exists under source_dir, any entries under
+    Additionally, if a global full_trajs.zip exists under source_dir, any entries under
     YYYYMMDD/data<run>/ within it will also be extracted to the same destination.
     Parameters:
         source_dir (str): Base directory for source ZIP files.
         dest_dir (str): Base directory for extracted files.
     """
-    # Open global ref_trajs.zip once (if it exists)
-    ref_zip_path = os.path.join(source_dir, "ref_trajs.zip")
-    if os.path.isfile(ref_zip_path):
-        ref_zip = zipfile.ZipFile(ref_zip_path, "r")
-        ref_members = [m for m in ref_zip.infolist() if not m.is_dir()]
+    zip_path = os.path.join(source_dir, "full_trajs.zip")
+    if os.path.isfile(zip_path):
+        full_traj_zip = zipfile.ZipFile(zip_path, "r")
+        ref_members = [m for m in full_traj_zip.infolist() if not m.is_dir()]
     else:
-        ref_zip = None
-        print(f"Note: no ref_trajs.zip found at {ref_zip_path}")
+        full_traj_zip = None
+        print(f"Note: no full_trajs.zip found at {zip_path}")
 
     for group, date_runs in data_dict.items():
         group_dest_dir = os.path.join(dest_dir, group)
@@ -158,21 +162,24 @@ def process_data(source_dir, dest_dir):
                             zip_ref.extract(member, dest_folder)
                     print("  Unzipped successfully.")
 
-                    # --- New: extract all from global ref_trajs.zip ---
-                    if ref_zip:
-                        prefix = f"{date_part}/data{run_part}/"
+                    if full_traj_zip:
+                        prefix = f"full_trajs/{date_part}/data{run_part}/"
                         trajs = [m for m in ref_members if m.filename.startswith(prefix)]
                         if trajs:
-                            print("  Extracting trajectories from ref_trajs.zip...")
+                            print("  Extracting trajectories from full_trajs.zip...")
                             for traj in tqdm(trajs, desc="Trajectories", unit="file", total=len(trajs)):
                                 rel_path = traj.filename[len(prefix):]
                                 out_path = os.path.join(dest_folder, rel_path)
                                 os.makedirs(os.path.dirname(out_path), exist_ok=True)
-                                with ref_zip.open(traj) as src_f, open(out_path, "wb") as dst_f:
+                                with full_traj_zip.open(traj) as src_f, open(out_path, "wb") as dst_f:
                                     shutil.copyfileobj(src_f, dst_f)
                             print("  Trajectories extracted successfully.")
                         else:
                             print(f"  (no trajectories found for prefix '{prefix}')")
+                        if len(calib_files) > 0:
+                            for file in calib_files:
+                                shutil.copy(file, dest_folder)
+                        
 
                 except Exception as e:
                     print(f"  ERROR: Failed to unzip {src_zip}: {e}")
@@ -181,8 +188,8 @@ def process_data(source_dir, dest_dir):
 
             print("-" * 50)
 
-    if ref_zip:
-        ref_zip.close()
+    if full_traj_zip:
+        full_traj_zip.close()
 
 
 def main():

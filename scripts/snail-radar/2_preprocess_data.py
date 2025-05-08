@@ -95,6 +95,27 @@ def main():
         default="/datasets/snail-radar",
         help="Base directory containing the dataset folders."
     )
+
+    parser.add_argument(
+        "--norm_type",
+        type=str,
+        default="sphere",
+        choices=["range", "sphere", "raw"],
+        help=(
+            "Normalization type for point clouds: "
+            "'range'   – range normalization, "
+            "'sphere'– unit-sphere scaling, "
+            "'raw'   – leave data unchanged"
+        )
+    )
+    
+    parser.add_argument(
+        "--max_range", type=float, default=400.0,
+        help="Max distance (in meters) to include points; others are skipped")
+
+    parser.add_argument("--add_suffix", type=str, default=None,
+                        help="Additional info to be added to the output folder name.")
+        
     args = parser.parse_args()
     base_dir = args.base_dir
 
@@ -118,7 +139,12 @@ def main():
                     logging.error(f"Failed to create directory {datasets_root}: {e}")
                     continue
 
-            command = [sys.executable, preprocess_script, "--dataset_root", datasets_root, "--gps_ori_rel_path", "utm50r_T_x36dimu.txt"]
+            command = [
+                sys.executable, preprocess_script, 
+                "--dataset_root", datasets_root,
+                "--norm_type", args.norm_type,
+                "--maximum_range", str(args.max_range), 
+                "--add_suffix", args.add_suffix]
             try:
                 result = subprocess.run(
                     command,

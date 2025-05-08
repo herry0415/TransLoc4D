@@ -15,17 +15,15 @@ idx_ = {
     'noise_db': 10
 }
 
-def estimate_ego_vel(radar_scan, C_stab_r=None, retain_vel=False):
+def estimate_ego_vel(radar_scan, C_stab_r=None, retain_vel=False, maximum_range=120):
     """
     Estimate ego velocity from the radar scan and return the inlier (static) point cloud 
     along with the estimated ego velocity.
     
-    This optimized version vectorizes the initial filtering steps:
-      - Computes ranges, azimuths, and elevations in a vectorized manner.
-      - Filters valid points based on range and a transformed height condition.
-      - Constructs a consolidated array (valid_targets) containing all required fields.
+    - Computes ranges, azimuths, and elevations in a vectorized manner.
+    - Filters valid points based on range and a transformed height condition.
+    - Constructs a consolidated array (valid_targets) containing all required fields.
     
-    The RANSAC part remains iterative.
     """
     if radar_scan.shape[0] == 0:
         return False, None, radar_scan
@@ -36,16 +34,12 @@ def estimate_ego_vel(radar_scan, C_stab_r=None, retain_vel=False):
     elevation = np.arctan2(np.linalg.norm(pts[:, :2], axis=1), pts[:, 2]) - np.pi/2
 
     # First filtering by range.
-    valid_mask = (r > 0.25) & (r < 120)
+    valid_mask = (r > 0.25) & (r < maximum_range)
     if not np.any(valid_mask):
         print('No valid points found')
         return False, None, radar_scan
 
     pts_valid = pts[valid_mask]
-    r_valid = r[valid_mask]
-    az_valid = azimuth[valid_mask]
-    elev_valid = elevation[valid_mask]
-    radar_scan_valid = radar_scan[valid_mask]
 
     # Apply stabilization transformation if provided.
     if C_stab_r is not None:

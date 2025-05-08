@@ -5,23 +5,122 @@ import numpy as np
 import csv
 from os.path import join
 from tqdm import tqdm
-import utm
 import bisect
 from multiprocessing import Pool
 import shutil
+import json
 from scipy.spatial.transform import Rotation as R
+from scipy.spatial.transform import Slerp
 
 from transloc4d.datasets import estimate_ego_vel
 
+# globals for stage 1
+GLOBAL_RADAR_FOLDER = None
+GLOBAL_SAVE_PC       = None
+GLOBAL_W             = None
+GLOBAL_GEN_ORIG      = None
+GLOBAL_GEN_IMG       = None
+GLOBAL_IMG_FOLDER    = None
+GLOBAL_SORTED_IMAGES = None
+GLOBAL_TARGET_POINTS = None
+GLOBAL_INTERP_POSES  = None
+GLOBAL_BT_L          = None
+GLOBAL_BT_R          = None
+GLOBAL_NORM_FUNC     = None
+GLOBAL_MAXIMUM_RANGE = None
+
+# globals for stage 2
+GLOBAL_PREPROC = None
+GLOBAL_INTERP_POSES = None
+GLOBAL_BT_L = None
+GLOBAL_BT_R = None
+GLOBAL_W = None
+GLOBAL_SAVE_PC = None
+GLOBAL_GEN_ORIG = None
+GLOBAL_GEN_IMG = None
+GLOBAL_IMG_FOLDER = None
+GLOBAL_SORTED_IMAGES = None
+GLOBAL_TARGET_POINTS = None
+GLOBAL_PCD_FILES = None
+GLOBAL_NORM_FUNC = None
+
+
+def init_stage1(radar_folder, save_pc_folder, W, generate_original,
+                generate_images, image_folder, sorted_image_entries,
+                target_points, interp_poses, Body_T_L, Body_T_R,
+                norm_func, maximum_range):
+    global GLOBAL_RADAR_FOLDER, GLOBAL_SAVE_PC, GLOBAL_W, GLOBAL_GEN_ORIG
+    global GLOBAL_GEN_IMG, GLOBAL_IMG_FOLDER, GLOBAL_SORTED_IMAGES
+    global GLOBAL_TARGET_POINTS, GLOBAL_INTERP_POSES, GLOBAL_BT_L
+    global GLOBAL_BT_R, GLOBAL_NORM_FUNC, GLOBAL_MAXIMUM_RANGE
+
+    GLOBAL_RADAR_FOLDER = radar_folder
+    GLOBAL_SAVE_PC       = save_pc_folder
+    GLOBAL_W             = W
+    GLOBAL_GEN_ORIG      = generate_original
+    GLOBAL_GEN_IMG       = generate_images
+    GLOBAL_IMG_FOLDER    = image_folder
+    GLOBAL_SORTED_IMAGES = sorted_image_entries
+    GLOBAL_TARGET_POINTS = target_points
+    GLOBAL_INTERP_POSES  = interp_poses
+    GLOBAL_BT_L          = Body_T_L
+    GLOBAL_BT_R          = Body_T_R
+    GLOBAL_NORM_FUNC     = norm_func
+    GLOBAL_MAXIMUM_RANGE = maximum_range
+
+
+def init_stage2(preproc_list, interp_poses, Body_T_L, Body_T_R,
+                W, save_pc_folder,
+                generate_original, generate_images,
+                image_folder, sorted_image_entries,
+                target_points, pcd_files):
+    global GLOBAL_PREPROC, GLOBAL_INTERP_POSES, GLOBAL_BT_L, GLOBAL_BT_R
+    global GLOBAL_W, GLOBAL_SAVE_PC, GLOBAL_GEN_ORIG, GLOBAL_GEN_IMG
+    global GLOBAL_IMG_FOLDER, GLOBAL_SORTED_IMAGES, GLOBAL_TARGET_POINTS
+    global GLOBAL_PCD_FILES, GLOBAL_NORM_FUNC
+
+    GLOBAL_PREPROC       = {item[0]: item for item in preproc_list}
+    GLOBAL_INTERP_POSES  = interp_poses
+    GLOBAL_BT_L          = Body_T_L
+    GLOBAL_BT_R          = Body_T_R
+    GLOBAL_W             = W
+    GLOBAL_SAVE_PC       = save_pc_folder
+    GLOBAL_GEN_ORIG      = generate_original
+    GLOBAL_GEN_IMG       = generate_images
+    GLOBAL_IMG_FOLDER    = image_folder
+    GLOBAL_SORTED_IMAGES = sorted_image_entries
+    GLOBAL_TARGET_POINTS = target_points
+    GLOBAL_PCD_FILES     = pcd_files
+    GLOBAL_NORM_FUNC     = GLOBAL_NORM_FUNC
+
+
+def rot_slerp_batch(keytimes, keyquats, querytimes):
+    keyrots = R.from_quat(keyquats)
+    slerp = Slerp(keytimes, keyrots)
+    interp_rots = slerp(querytimes)
+    return interp_rots.as_quat()
+
+def pos_interpolate_batch(keytimes, keypositions, querytimes):
+    interp_positions = np.zeros((len(querytimes), 3))
+    for i in range(keypositions.shape[1]):
+        interp_positions[:, i] = np.interp(querytimes, keytimes, keypositions[:, i])
+    return interp_positions
+
+def interpolation(gt_times, gt_positions, gt_quats, radar_times):
+    interp_positions = pos_interpolate_batch(gt_times, gt_positions, radar_times)
+    interp_quats = rot_slerp_batch(gt_times, gt_quats, radar_times)
+    poses = []
+    for i, q_i in enumerate(interp_quats):
+        quat_max = R.from_quat(q_i).as_matrix()
+        xyz = interp_positions[i].reshape(3, 1)
+        pose = np.hstack((quat_max, xyz))
+        pose = np.vstack((pose, [0, 0, 0, 1]))
+        poses.append(pose)
+    return poses
 
 def load_pcd(filename):
-    """
-    Optimized version: Read a PCD file and return the list of fields and a numpy array of points.
-    Instead of per-field unpacking, we read the binary block in one call using np.frombuffer.
-    """
     with open(filename, 'rb') as file:
         fields = []
-        # Read header until "DATA" line is encountered.
         while True:
             line = file.readline().decode('utf-8')
             if not line:
@@ -36,113 +135,15 @@ def load_pcd(filename):
         num_floats = len(binary_data) // 4
         data = np.frombuffer(binary_data, dtype=np.float32, count=num_floats)
         if num_floats % len(fields) != 0:
-            raise ValueError(
-                "Binary data size is not a multiple of the number of fields.")
+            raise ValueError("Binary data size is not a multiple of the number of fields.")
         points = data.reshape(-1, len(fields))
     return fields, points
 
-
-def parse_gps_file(gps_file_path):
-    """
-    Parse the GPS file and return a sorted list of tuples: (time, latitude, longitude).
-    """
-    gps_entries = []
-    with open(gps_file_path, "r") as f:
-        for line in f:
-            parts = line.strip().split()
-            if len(parts) < 3:
-                continue
-            try:
-                gps_time = float(parts[0])
-                lat = float(parts[1])
-                lon = float(parts[2])
-                gps_entries.append((gps_time, lat, lon))
-            except ValueError:
-                continue
-    gps_entries.sort(key=lambda x: x[0])
-    return gps_entries
-
-
-def find_closest_gps(gps_entries, target_time):
-    """
-    Find the GPS entry with the timestamp closest to target_time using binary search.
-    """
-    times = [entry[0] for entry in gps_entries]
-    pos = bisect.bisect_left(times, target_time)
-    if pos == 0:
-        return gps_entries[0]
-    if pos == len(times):
-        return gps_entries[-1]
-    before = gps_entries[pos - 1]
-    after = gps_entries[pos]
-    if abs(before[0] - target_time) <= abs(after[0] - target_time):
-        return before
-    else:
-        return after
-
-def parse_gps_ori_file(gps_ori_file_path):
-    """
-    Parse the GPS orientation file (with quaternion) and return a sorted list of tuples:
-    (time, qx, qy, qz, qw).
-    """
-    ori_entries = []
-    with open(gps_ori_file_path, 'r') as f:
-        for line in f:
-            line = line.strip()
-            # skip header/comment lines
-            if not line or line.startswith('#'):
-                continue
-            parts = line.split(',')
-            # expecting at least: timestamp, easting, northing, up, qx, qy, qz, qw, ...
-            if len(parts) < 8:
-                continue
-            try:
-                ori_time = float(parts[0])
-                qx = float(parts[4])
-                qy = float(parts[5])
-                qz = float(parts[6])
-                qw = float(parts[7])
-                ori_entries.append((ori_time, qx, qy, qz, qw))
-            except ValueError:
-                continue
-    ori_entries.sort(key=lambda x: x[0])
-    return ori_entries
-
-
-def find_closest_ori(ori_entries, target_time):
-    """
-    Find the orientation entry with the timestamp closest to target_time using binary search.
-    """
-    times = [entry[0] for entry in ori_entries]
-    pos = bisect.bisect_left(times, target_time)
-    if pos == 0:
-        return ori_entries[0]
-    if pos == len(times):
-        return ori_entries[-1]
-    before = ori_entries[pos - 1]
-    after = ori_entries[pos]
-    if abs(before[0] - target_time) <= abs(after[0] - target_time):
-        return before
-    else:
-        return after
-
-
 def quaternion_to_euler(qx, qy, qz, qw):
-    """
-    Convert quaternion (qx, qy, qz, qw) to roll, pitch, yaw angles (in radians) using scipy.
-    """
     rot = R.from_quat([qx, qy, qz, qw])
-    roll, pitch, yaw = rot.as_euler('xyz', degrees=False)
-    return roll, pitch, yaw
-
-# --- end new utilities ---
-
+    return rot.as_euler('xyz', degrees=False)
 
 def find_closest_image(sorted_image_entries, target_time):
-    """
-    Find the image entry with the timestamp closest to target_time using binary search.
-    sorted_image_entries is a sorted list of tuples: (timestamp, filename).
-    """
     image_times = [entry[0] for entry in sorted_image_entries]
     pos = bisect.bisect_left(image_times, target_time)
     if pos == 0:
@@ -151,29 +152,18 @@ def find_closest_image(sorted_image_entries, target_time):
         return sorted_image_entries[-1][1]
     before = sorted_image_entries[pos - 1]
     after = sorted_image_entries[pos]
-    if abs(before[0] - target_time) <= abs(after[0] - target_time):
-        return before[1]
-    else:
-        return after[1]
-
+    return before[1] if abs(before[0] - target_time) <= abs(after[0] - target_time) else after[1]
 
 def process_timestamp(timestamp_str):
-    """
-    Convert a timestamp string format to an integer string
-    by multiplying the float value by 1e6 and truncating.
-    """
     timestamp_float = float(timestamp_str)
-    timestamp_int = int(timestamp_float * 1e6)
-    return str(timestamp_int)
+    return str(int(timestamp_float * 1e6))
 
-
-def normalize_xyz(points):
+def normalize_sphere(points):
     """
-    Normalize the xyz coordinates of the point cloud.
-    Parameters:
-        points (np.ndarray): Array of shape (N, 3) representing the x, y, z coordinates.
-    Returns:
-        np.ndarray: Normalized points.
+    Shape-centric normalization:
+    1) subtract the point-cloud centroid (so shape is centered at 0)
+    2) divide by the furthest point’s distance (so shape fits inside unit ball)
+    Loses all absolute translation information.
     """
     centroid = np.mean(points, axis=0)
     points = points - centroid
@@ -182,234 +172,324 @@ def normalize_xyz(points):
         points = points / furthest_distance
     return points
 
+def normalize_range(points, range=120.0):
+    """
+    Sensor-centric range normalization:
+    1) divide all points by max_range so that the sensor origin remains at 0
+       and every coordinate lies in [-1,1].
+    Preserves translation and uses the full [–1,1]³ cube for quantization.
+    """
+    return points / range
+
+def normalize_raw(points):
+    return points
 
 def resample_pointcloud(points, target_size=4096):
-    """
-    Resample the point cloud to have exactly target_size points.
-    Parameters:
-        points (np.ndarray): Point cloud array of shape (N, D).
-        target_size (int): Desired number of points.
-    Returns:
-        np.ndarray: Resampled point cloud of shape (target_size, D).
-    """
     current_size = points.shape[0]
     if current_size > target_size:
         indices = np.random.choice(current_size, target_size, replace=False)
-        return points[indices, :]
     elif current_size < target_size:
         indices = np.random.choice(current_size, target_size, replace=True)
-        return points[indices, :]
-    return points
-
-
-def process_single_pcd(task):
-    """
-    Process a single PCD file:
-      - Reads and vectorizes the binary point cloud data.
-      - Extracts the needed fields.
-      - Optionally estimates ego velocity.
-      - Normalizes the xyz coordinates and resamples the point cloud to a fixed number of points.
-      - Filters out scans with fewer than 10 unique xyz points.
-      - Saves the processed point cloud as a .npy file.
-      - If image generation is enabled, finds the closest image using find_closest_image
-        and copies it to a new folder with the new timestamp.
-      - Returns a tuple for GPS (and optionally orientation) synchronization.
-    """
-    (pcd_file,
-     radar_folder,
-     save_pointclouds_folder,
-     gps_entries,
-     generate_original,
-     generate_images,
-     image_folder,
-     sorted_image_entries,
-     target_points,
-     ori_entries) = task
-
-    msg = ""
-    raw_timestamp = pcd_file[:-4]  # remove ".pcd"
-    processed_timestamp = process_timestamp(raw_timestamp)
-    pcd_file_path = join(radar_folder, pcd_file)
-    try:
-        fields, points = load_pcd(pcd_file_path)
-    except Exception as e:
-        msg = f"Error loading {pcd_file}: {e}"
-        return None, msg
-    if points.size == 0:
-        msg = f"Warning: No data found in file {pcd_file}"
-        return None, msg
-    try:
-        idx_x = fields.index('x')
-        idx_y = fields.index('y')
-        idx_z = fields.index('z')
-        idx_doppler = fields.index('Doppler')
-        idx_power = fields.index('Power')
-    except ValueError as e:
-        msg = f"Error processing {pcd_file}: {e}"
-        return None, msg
-    radar_scan = points[:, [idx_x, idx_y, idx_z,
-                            idx_doppler, idx_power]].astype(np.float32)
-    flag, _, processed_scan = estimate_ego_vel(radar_scan)
-    if not flag:
-        msg = f"Warning: Ego velocity estimation failed for file {pcd_file}"
-        processed_scan = radar_scan
-
-    processed_scan[:, :3] = normalize_xyz(processed_scan[:, :3])
-    processed_scan = resample_pointcloud(
-        processed_scan, target_size=target_points)
-
-    # Filter out scans with fewer than 10 unique xyz points
-    unique_xyz = np.unique(processed_scan[:, :3], axis=0)
-    if unique_xyz.shape[0] < 10:
-        msg = f"Filtered: only {unique_xyz.shape[0]} unique points in {pcd_file}"
-        return None, msg
-
-    # Save processed point cloud as .npy file.
-    npy_save_path = join(save_pointclouds_folder, f"{processed_timestamp}.npy")
-    np.save(npy_save_path, processed_scan)
-    if generate_original:
-        npy_save_path_original = join(
-            save_pointclouds_folder, f"{processed_timestamp}_org.npy")
-        np.save(npy_save_path_original, radar_scan)
-
-    # GPS synchronization.
-    target_time = float(raw_timestamp)
-    closest_gps = find_closest_gps(gps_entries, target_time)
-    lat, lon = closest_gps[1], closest_gps[2]
-    utm_result = utm.from_latlon(lat, lon)
-    easting, northing = utm_result[0], utm_result[1]
-
-    # Orientation synchronization (if provided)
-    if ori_entries:
-        closest_ori = find_closest_ori(ori_entries, target_time)
-        _, qx, qy, qz, qw = closest_ori
-        roll, pitch, yaw = quaternion_to_euler(qx, qy, qz, qw)
-        gps_orient_tuple = (processed_timestamp, northing, easting, roll, pitch, yaw)
     else:
-        gps_orient_tuple = (processed_timestamp, northing, easting)
+        return points
+    return points[indices, :]
 
-    # If image generation is enabled, find and copy the closest image.
+def preprocess_frame(args):
+    idx, filename = args
+    radar_folder       = GLOBAL_RADAR_FOLDER
+    save_pc_folder     = GLOBAL_SAVE_PC
+    W                  = GLOBAL_W
+    generate_original  = GLOBAL_GEN_ORIG
+    generate_images    = GLOBAL_GEN_IMG
+    image_folder       = GLOBAL_IMG_FOLDER
+    sorted_image_entries = GLOBAL_SORTED_IMAGES
+    target_points      = GLOBAL_TARGET_POINTS
+    interp_poses       = GLOBAL_INTERP_POSES
+    Body_T_L           = GLOBAL_BT_L
+    Body_T_R           = GLOBAL_BT_R
+    norm_func          = GLOBAL_NORM_FUNC
+    maximum_range      = GLOBAL_MAXIMUM_RANGE
+
+    raw_timestamp = filename[:-4]
+    processed_timestamp = process_timestamp(raw_timestamp)
+    ts_float = float(raw_timestamp)
+
+    fields, pts = load_pcd(join(radar_folder, filename))
+    try:
+        ix = fields.index('x')
+        iy = fields.index('y')
+        iz = fields.index('z')
+        idop = fields.index('Doppler')
+        ipow = fields.index('Power')
+    except ValueError:
+        return None
+
+    radar_scan = pts[:, [ix, iy, iz, idop, ipow]].astype(np.float32)
+    flag, _, proc_scan = estimate_ego_vel(radar_scan, maximum_range=maximum_range)
+    if not flag:
+        proc_scan = radar_scan.copy()
+
+    if W == 1:
+        proc_scan[:, :3] = norm_func(proc_scan[:, :3])
+        proc_scan = resample_pointcloud(proc_scan, target_size=target_points)
+        if np.unique(proc_scan[:, :3], axis=0).shape[0] < 10:
+            return None
+
+        np.save(join(save_pc_folder, f"{processed_timestamp}.npy"), proc_scan)
+        if generate_original:
+            radar_scan[:, :3] = norm_func(radar_scan[:, :3])
+            np.save(join(save_pc_folder, f"{processed_timestamp}_org.npy"), radar_scan)
+
+        if generate_images and image_folder and sorted_image_entries:
+            try:
+                img = find_closest_image(sorted_image_entries, ts_float)
+                dst = join(os.path.dirname(save_pc_folder), "images")
+                os.makedirs(dst, exist_ok=True)
+                ext = img.split('.')[-1]
+                shutil.copy(join(image_folder, img),
+                            join(dst, f"{processed_timestamp}.{ext}"))
+            except:
+                pass
+
+        U_T_L_c = interp_poses[idx]
+        L_T_R = np.linalg.inv(Body_T_L) @ Body_T_R
+        U_T_R_c = U_T_L_c @ L_T_R
+        tx, ty, tz = U_T_R_c[:3, 3]
+        roll, pitch, yaw = quaternion_to_euler(*R.from_matrix(U_T_R_c[:3, :3]).as_quat())
+
+        return (processed_timestamp, ty, tx, tz, roll, pitch, yaw)
+    else:
+        return (idx, processed_timestamp, ts_float, radar_scan, proc_scan)
+
+def process_accumulate_window(args):
+    window_idxs, center_idx = args
+    preproc              = GLOBAL_PREPROC
+    interp_poses         = GLOBAL_INTERP_POSES
+    Body_T_L             = GLOBAL_BT_L
+    Body_T_R             = GLOBAL_BT_R
+    save_pc_folder       = GLOBAL_SAVE_PC
+    generate_original    = GLOBAL_GEN_ORIG
+    generate_images      = GLOBAL_GEN_IMG
+    image_folder         = GLOBAL_IMG_FOLDER
+    sorted_image_entries = GLOBAL_SORTED_IMAGES
+    target_points        = GLOBAL_TARGET_POINTS
+    pcd_files            = GLOBAL_PCD_FILES
+    norm_func            = GLOBAL_NORM_FUNC
+
+    center_file = pcd_files[center_idx]
+    raw_timestamp = center_file[:-4]
+    processed_timestamp = process_timestamp(raw_timestamp)
+
+    U_T_L_c = interp_poses[center_idx]
+    L_T_R = np.linalg.inv(Body_T_L) @ Body_T_R
+    U_T_R_c = U_T_L_c @ L_T_R
+    Rc_T_U = np.linalg.inv(U_T_R_c)
+
+    subpc = []
+    for j in window_idxs:
+        _, _, _, _, proc_scan = preproc[j]
+        xyz = proc_scan[:, :3]
+        inten = proc_scan[:, 4][:, None]
+
+        U_T_L_j = interp_poses[j]
+        U_T_R_j = U_T_L_j @ L_T_R
+        Rc_T_Rj = Rc_T_U @ U_T_R_j
+
+        hpts = np.hstack([xyz, np.ones((xyz.shape[0], 1), dtype=np.float32)])
+        xyz_c = (Rc_T_Rj @ hpts.T).T[:, :3]
+        speed = np.zeros((xyz_c.shape[0], 1), dtype=np.float32)
+        subpc.append(np.hstack([xyz_c, speed, inten]))
+
+    subpc = np.vstack(subpc)
+    subpc = resample_pointcloud(subpc, target_size=target_points)
+    subpc[:, :3] = norm_func(subpc[:, :3])
+    if np.unique(subpc[:, :3], axis=0).shape[0] < 10:
+        return None
+
+    np.save(join(save_pc_folder, f"{processed_timestamp}.npy"), subpc)
+    if generate_original:
+        _, _, _, radar_scan, _ = GLOBAL_PREPROC[center_idx]
+        radar_scan[:, :3] = norm_func(radar_scan[:, :3])
+        np.save(join(save_pc_folder, f"{processed_timestamp}_org.npy"), radar_scan)
+
     if generate_images and image_folder and sorted_image_entries:
         try:
-            pcd_time = float(raw_timestamp)
-            closest_image = find_closest_image(sorted_image_entries, pcd_time)
-            src_image_path = join(image_folder, closest_image)
-            dst_image_folder = join(os.path.dirname(
-                save_pointclouds_folder), "images")
-            os.makedirs(dst_image_folder, exist_ok=True)
-            img_ext = src_image_path.split('.')[-1]
-            dst_image_path = join(
-                dst_image_folder, f"{processed_timestamp}.{img_ext}")
-            shutil.copy(src_image_path, dst_image_path)
-        except Exception as e:
-            msg += f"\nWarning: Failed to process image for {pcd_file}: {e}"
+            ts_float = float(raw_timestamp)
+            img = find_closest_image(sorted_image_entries, ts_float)
+            dst = join(os.path.dirname(save_pc_folder), "images")
+            os.makedirs(dst, exist_ok=True)
+            ext = img.split('.')[-1]
+            shutil.copy(join(image_folder, img),
+                        join(dst, f"{processed_timestamp}.{ext}"))
+        except:
+            pass
 
-    return gps_orient_tuple, msg
-
+    tx, ty, tz = U_T_R_c[:3, 3]
+    roll, pitch, yaw = quaternion_to_euler(*R.from_matrix(U_T_R_c[:3, :3]).as_quat())
+    return (processed_timestamp, ty, tx, tz, roll, pitch, yaw)
 
 def get_args():
     parser = argparse.ArgumentParser(
-        description="Preprocess radar dataset, synchronize GPS data, and process point clouds with normalization and resampling."
+        description="Preprocess radar dataset with optional windowed accumulation"
     )
-    parser.add_argument("--dataset_root", type=str, default="/datasets/snail-radar/20240116",
+    parser.add_argument("--dataset_root", type=str, default="/datasets/snail-radar/bc/20230920_1",
                         help="Root directory of the dataset")
     parser.add_argument("--radar_rel_path", type=str, default="eagleg7/enhanced",
                         help="Relative path to radar .pcd files")
-    parser.add_argument("--gps_rel_path", type=str, default="x36d/gnss_ins.txt",
-                        help="Relative path to GPS file")
-    parser.add_argument("--gps_ori_rel_path", type=str, default=None,
-                        help="Relative path to GPS orientation TXT file (quaternion data)")
+    parser.add_argument("--lidar_pose_rel_path", type=str, default="utm50r_T_xt32.txt",
+                        help="Relative path to utm50r->LiDAR pose file")
+    parser.add_argument("--lidar_calib_rel_path",type=str, default="body_T_xt32.txt",
+                        help="Relative path to LiDAR calibration (body->LiDAR) file")
+    parser.add_argument("--radar_calib_rel_path",type=str, default="body_T_oculii.txt",
+                        help="Relative path to Radar calibration (body->Radar) file")
     parser.add_argument("--img_rel_path", type=str, default="zed2i/left",
                         help="Relative path to image camera image files")
     parser.add_argument("--save_folder", type=str, default=None,
                         help="Folder to save preprocessed data")
+    parser.add_argument("--accum_win", type=int, default=1,
+                        help="If >1, number of consecutive frames to accumulate")
     parser.add_argument("-o", "--generate_original", action="store_true",
                         help="Generate original point clouds without outlier removal at the same time.")
     parser.add_argument("-i", "--generate_images", action="store_true",
                         help="Copy images from raw data to new folder.")
     parser.add_argument("--target_points", type=int, default=4096,
                         help="The desired number of points in the processed point cloud (for up/down sampling).")
+    parser.add_argument(
+        "--norm_type",
+        type=str,
+        default="sphere",
+        choices=["range", "sphere", "raw"],
+        help=(
+            "Normalization type for point clouds: "
+            "'range'   – range normalization, "
+            "'sphere'– unit-sphere scaling, "
+            "'raw'   – leave data unchanged"
+        )
+    )
+    parser.add_argument("--maximum_range", type=float, default=120.0,
+                        help="Maximum range of pts to be kept.")
+    parser.add_argument("--add_suffix", type=str, default="",
+                        help="Additional info to be added to the output folder name.")
+
     args = parser.parse_args()
     if args.save_folder is None:
-        args.save_folder = f"{args.dataset_root}_preprocessed"
+        suffix = "" if args.accum_win == 1 else f"_accm{args.accum_win}"
+        add_suffix = f"_{args.add_suffix}" if args.add_suffix else ""
+        args.save_folder = f"{args.dataset_root}_preprocessed{suffix}{add_suffix}"
+    os.makedirs(args.save_folder, exist_ok=True)
+    with open(join(args.save_folder, "args.txt"), "w") as f:
+        for k, v in vars(args).items():
+            f.write(f"{k}: {v}\n")
     return args
-
 
 def main():
     args = get_args()
     radar_folder = join(args.dataset_root, args.radar_rel_path)
-    gps_file_path = join(args.dataset_root, args.gps_rel_path)
-    os.makedirs(args.save_folder, exist_ok=True)
-    save_pointclouds_folder = join(args.save_folder, "pointclouds")
-    os.makedirs(save_pointclouds_folder, exist_ok=True)
+    save_folder = args.save_folder
+    save_pc_folder = join(save_folder, "pointclouds")
+    os.makedirs(save_pc_folder, exist_ok=True)
 
-    # Load and sort GPS data.
-    gps_entries = parse_gps_file(gps_file_path)
-
-    # Load and sort GPS orientation data if requested.
-    if args.gps_ori_rel_path:
-        gps_ori_file_path = join(args.dataset_root, args.gps_ori_rel_path)
-        ori_entries = parse_gps_ori_file(gps_ori_file_path)
+    if args.norm_type == "range":
+        norm_func = lambda points: normalize_range(points, range=args.maximum_range)
+        
+    elif args.norm_type == "sphere":
+        norm_func = normalize_sphere
     else:
-        ori_entries = None
+        norm_func = normalize_raw
 
-    # Build tasks list.
-    pcd_files = [f for f in os.listdir(radar_folder) if f.endswith('.pcd')]
+    # load poses
+    pose_file = join(args.dataset_root, args.lidar_pose_rel_path)
+    times, positions, quats = [], [], []
+    with open(pose_file, 'r') as f:
+        for line in f:
+            parts = line.strip().split()
+            if not parts or parts[0].startswith('#') or len(parts) < 8:
+                continue
+            t = float(parts[0]); times.append(t)
+            positions.append(list(map(float, parts[1:4])))
+            quats.append(list(map(float, parts[4:8])))
+    times = np.array(times)
+    t_min, t_max = times[0], times[-1]
+    positions = np.array(positions)
+    quats = np.array(quats)
 
-    # If image generation is enabled, prepare the image folder and a sorted list of images.
+    # list & filter radar files
+    all_files = sorted([f for f in os.listdir(radar_folder) if f.endswith('.pcd')])
+    all_times = np.array([float(f[:-4]) for f in all_files])
+    valid_mask = (all_times >= t_min) & (all_times <= t_max)
+    pcd_files = [all_files[i] for i in np.nonzero(valid_mask)[0]]
+    radar_times = all_times[valid_mask]
+
+    interp_poses = interpolation(times, positions, quats, radar_times)
+    Body_T_L = np.loadtxt(join(args.dataset_root, args.lidar_calib_rel_path)).reshape(4, 4)
+    Body_T_R = np.loadtxt(join(args.dataset_root, args.radar_calib_rel_path)).reshape(4, 4)
+
+    # prepare images
     if args.generate_images:
         image_folder = join(args.dataset_root, args.img_rel_path)
-        image_files = [f for f in os.listdir(image_folder) if f.lower().endswith(
-            '.jpg') or f.lower().endswith('.png')]
+        image_files = [f for f in os.listdir(image_folder)
+                       if f.lower().endswith(('.jpg', '.png'))]
         sorted_image_entries = []
-        for f in image_files:
+        for im in image_files:
             try:
-                ts = float(f[:-4])
-                sorted_image_entries.append((ts, f))
-            except ValueError:
-                continue
+                ts = float(im[:-4]); sorted_image_entries.append((ts, im))
+            except:
+                pass
         sorted_image_entries.sort(key=lambda x: x[0])
     else:
         image_folder = None
         sorted_image_entries = None
 
-    tasks = []
-    for pcd_file in pcd_files:
-        tasks.append((
-            pcd_file,
-            radar_folder,
-            save_pointclouds_folder,
-            gps_entries,
-            args.generate_original,
-            args.generate_images,
-            image_folder,
-            sorted_image_entries,
-            args.target_points,
-            ori_entries
-        ))
+    W = args.accum_win
 
+    # Stage 1: per-frame preprocessing with init_stage1
+    init1_args = (
+        radar_folder, save_pc_folder, W, args.generate_original,
+        args.generate_images, image_folder, sorted_image_entries,
+        args.target_points, interp_poses, Body_T_L, Body_T_R,
+        norm_func, args.maximum_range
+    )
+    tasks1 = [(idx, fn) for idx, fn in enumerate(pcd_files)]
     results = []
-    with Pool() as pool:
-        for res, msg in tqdm(pool.imap_unordered(
-                process_single_pcd, tasks, chunksize=10),
-                total=len(tasks), desc="Processing PCD files"):
-            if msg:
-                tqdm.write(msg)
-            if res is not None:
-                results.append(res)
-
-    results.sort(key=lambda x: int(x[0]))
-
-    # Save GPS (and orientation) synchronization data.
-    gps_csv_path = join(args.save_folder, "gps.csv")
-    with open(gps_csv_path, "w", newline="") as csvfile:
-        writer = csv.writer(csvfile)
-        if args.gps_ori_rel_path:
-            writer.writerow(["timestamp", "northing", "easting", "roll", "pitch", "yaw"])
+    with Pool(initializer=init_stage1, initargs=init1_args) as pool:
+        if W == 1:
+            for gps_tuple in tqdm(pool.imap_unordered(preprocess_frame, tasks1),
+                                  total=len(tasks1), desc="Processing frames"):
+                if gps_tuple:
+                    results.append(gps_tuple)
         else:
-            writer.writerow(["timestamp", "northing", "easting"])
-        writer.writerows(results)
+            preproc_list = list(tqdm(pool.imap_unordered(preprocess_frame, tasks1),
+                                     total=len(tasks1), desc="Estimating ego velocity"))
+            preproc_list = [r for r in preproc_list if r]
 
+    # Stage 2: window accumulation (unchanged)
+    if W > 1:
+        windows, centers = [], []
+        N = len(pcd_files)
+        for start in range(N - W + 1):
+            win = list(range(start, start + W))
+            windows.append(win)
+            centers.append(win[W // 2])
+
+        init2_args = (preproc_list, interp_poses, Body_T_L, Body_T_R,
+                      W, save_pc_folder, args.generate_original,
+                      args.generate_images, image_folder,
+                      sorted_image_entries, args.target_points,
+                      pcd_files)
+        with Pool(initializer=init_stage2, initargs=init2_args) as pool:
+            for gps_tuple in tqdm(pool.imap_unordered(process_accumulate_window,
+                                                      zip(windows, centers)),
+                                  total=len(windows), desc="Accumulating windows"):
+                if gps_tuple:
+                    results.append(gps_tuple)
+
+    # write GPS csv
+    results.sort(key=lambda x: int(x[0]))
+    gps_csv = join(save_folder, "gps.csv")
+    with open(gps_csv, "w", newline="") as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(["timestamp", "northing", "easting", "height", "roll", "pitch", "yaw"])
+        writer.writerows(results)
 
 if __name__ == "__main__":
     main()

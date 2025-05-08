@@ -110,7 +110,7 @@ mapping = {
 }
 
 
-def merge_sequences(split, sequences, dataset_root, merge_output_dir, clean_original):
+def merge_sequences(split, sequences, dataset_root, merge_output_dir, clean_original, dataset_suffix="preprocessed"):
     """
     For a given list of sequences, copy the pointcloud files concurrently and merge
     the GPS CSV files into a single file in the destination folder.
@@ -130,7 +130,7 @@ def merge_sequences(split, sequences, dataset_root, merge_output_dir, clean_orig
         for seq_info in tqdm(sequences, desc=f"Merging sequences for {split}", unit="seq", position=1, leave=False):
             place = seq_info["place"]
             sequence_id = seq_info["sequence_id"]
-            source_dir = os.path.join(dataset_root, place, f"{sequence_id}_preprocessed")
+            source_dir = os.path.join(dataset_root, place, f"{sequence_id}_{dataset_suffix}")
             if not os.path.exists(source_dir):
                 tqdm.write(f"Warning: Source directory '{source_dir}' does not exist. Skipping {sequence_id}.")
                 continue
@@ -153,7 +153,7 @@ def merge_sequences(split, sequences, dataset_root, merge_output_dir, clean_orig
                         try:
                             future.result()
                             with log_lock:
-                                log_out.write(f"{filename}: from {place}/{sequence_id}_preprocessed/pointclouds/{filename}\n")
+                                log_out.write(f"{filename}: from {place}/{sequence_id}_{dataset_suffix}/pointclouds/{filename}\n")
                         except Exception as e:
                             tqdm.write(f"Error copying '{os.path.join(source_pointclouds, filename)}': {e}")
 
@@ -177,7 +177,7 @@ def merge_sequences(split, sequences, dataset_root, merge_output_dir, clean_orig
                                 for line in lines[1:]:
                                     gps_out.write(line)
                             with log_lock:
-                                log_out.write(f"Merged GPS from {place}/{sequence_id}_preprocessed/gps.csv\n")
+                                log_out.write(f"Merged GPS from {place}/{sequence_id}_{dataset_suffix}/gps.csv\n")
                             tqdm.write(f"Merged GPS data from '{source_gps}'.")
                 except Exception as e:
                     tqdm.write(f"Error processing GPS file '{source_gps}': {e}")
@@ -193,7 +193,7 @@ def merge_sequences(split, sequences, dataset_root, merge_output_dir, clean_orig
     tqdm.write(f"Merging for {split} complete. Merged data is in '{merge_output_dir}'.")
 
 
-def process_merged_split(split_name, category, mapping_split, dataset_root, output_dataset_root, clean_original):
+def process_merged_split(split_name, category, mapping_split, dataset_root, output_dataset_root, clean_original, dataset_suffix="preprocessed"):
     """
     Flattens the mapping (per place) for train/val splits and calls merge_sequences.
     """
@@ -205,12 +205,12 @@ def process_merged_split(split_name, category, mapping_split, dataset_root, outp
         merge_output_dir = os.path.join(output_dataset_root, DATASET_NAME, split_name, category)
         os.makedirs(merge_output_dir, exist_ok=True)
         tqdm.write(f"Processing {split_name} {category} with {len(sequences)} sequences into '{merge_output_dir}'.")
-        merge_sequences(f"{split_name}-{category}", sequences, dataset_root, merge_output_dir, clean_original)
+        merge_sequences(f"{split_name}-{category}", sequences, dataset_root, merge_output_dir, clean_original, dataset_suffix=dataset_suffix)
     else:
         tqdm.write(f"No sequences for {split_name} {category}.")
 
 
-def process_test_split(mapping_test, dataset_root, output_dataset_root, clean_original):
+def process_test_split(mapping_test, dataset_root, output_dataset_root, clean_original, dataset_suffix="preprocessed"):
     """
     Processes the test split (organized per place). For each place and category,
     flattens the list of sequence IDs and calls merge_sequences.
@@ -224,7 +224,7 @@ def process_test_split(mapping_test, dataset_root, output_dataset_root, clean_or
             os.makedirs(merge_output_dir, exist_ok=True)
             if sequences:
                 tqdm.write(f"Processing test {category} for place '{place}' with {len(sequences)} sequences into '{merge_output_dir}'.")
-                merge_sequences(f"test-{place}-{category}", sequences, dataset_root, merge_output_dir, clean_original)
+                merge_sequences(f"test-{place}-{category}", sequences, dataset_root, merge_output_dir, clean_original, dataset_suffix=dataset_suffix)
             else:
                 tqdm.write(f"No test sequences for {place} {category}.")
 
@@ -239,7 +239,14 @@ def main():
                         help="Path where the reorganized dataset will be saved.")
     parser.add_argument('--clean', action='store_true',
                         help="If set, delete the original source folders after copying.")
+    parser.add_argument("--add_suffix", type=str, default="",
+                        help="Additional info to describe the dataset.")
     args = parser.parse_args()
+
+    dataset_suffix = "preprocessed"
+    if args.add_suffix:
+        args.output_dataset_root = f"{args.output_dataset_root}_{args.add_suffix}"
+        dataset_suffix = f"{dataset_suffix}_{args.add_suffix}"
 
     # Process all splits: train, val, and test.
     all_splits = ["train", "val", "test"]
@@ -247,11 +254,11 @@ def main():
         if split in ["train", "val"]:
             mapping_split = mapping.get(split, {})
             for category in ["query", "database"]:
-                process_merged_split(split, category, mapping_split, args.dataset_root, args.output_dataset_root, args.clean)
+                process_merged_split(split, category, mapping_split, args.dataset_root, args.output_dataset_root, args.clean, dataset_suffix=dataset_suffix)
         elif split == "test":
             mapping_test = mapping.get("test", {})
             if mapping_test:
-                process_test_split(mapping_test, args.dataset_root, args.output_dataset_root, args.clean)
+                process_test_split(mapping_test, args.dataset_root, args.output_dataset_root, args.clean, dataset_suffix=dataset_suffix)
             else:
                 tqdm.write("No test mapping defined.")
 

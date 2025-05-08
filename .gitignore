@@ -6,3 +6,4 @@ build
 weights
 *.pth.tar
 *.pickle
+norm_stats
