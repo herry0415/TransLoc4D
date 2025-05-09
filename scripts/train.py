@@ -211,7 +211,6 @@ def do_train(params: TrainingParams, model_name, weights_folder, resume_filename
     print('  Model device: {}'.format(device))
 
     # set up dataloaders
-    # dataloaders = make_dataloaders(params)
     dataloaders = make_dataloaders(params, validation=False)
 
     loss_fn = make_losses(params)
@@ -406,7 +405,7 @@ def do_train(params: TrainingParams, model_name, weights_folder, resume_filename
     writer.close()  # Close the TensorBoard writer when training completes
 
 
-def create_weights_folder(model_name, dataset_name):
+def create_weights_folder(model_name, ssataset_name):
     # Create a folder to save weights of trained models
     this_file_path = pathlib.Path(__file__).parent.absolute()
     temp, _ = os.path.split(this_file_path)
@@ -454,7 +453,7 @@ if __name__ == '__main__':
     
     current_time = time.strftime("%Y%m%d_%H%M")
     model_name = f"{current_time}_{params.model_name}"
-    dataset_name = params.train_file.replace('.pickle', '')
+    dataset_name = args.config.split('/')[-1].split('.')[0]
     weights_folder = create_weights_folder(model_name, dataset_name)
     copyfile(args.config, os.path.join(weights_folder, 'train_config.txt'))
     copyfile(args.model_config, os.path.join(weights_folder, 'model_config.txt'))
