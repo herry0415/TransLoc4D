@@ -17,6 +17,7 @@ from transloc4d import evaluate_4drad_dataset, save_recall_results
 from transloc4d.misc.utils import TrainingParams
 from transloc4d.datasets import WholeDataset, make_dataloaders
 from transloc4d.models import (make_losses, get_model)
+from transloc4d.datasets import ValSetTransform
 
 
 class Logger(object):
@@ -188,7 +189,10 @@ def do_train(params: TrainingParams, model_name, weights_folder, resume_filename
 
     val_sets = [
         {
-            "dataset": WholeDataset(os.path.join(params.dataset_folder, params.val_databases[i]), os.path.join(params.dataset_folder, params.val_queries[i])),
+            "dataset": WholeDataset(
+                os.path.join(params.dataset_folder, params.val_databases[i]), 
+                os.path.join(params.dataset_folder, params.val_queries[i]),
+                input_transform=ValSetTransform(1, mean=params.norm_mean, std=params.norm_std)),
             "database_name": params.val_databases[i],
             "query_name": params.val_queries[i]
         } for i in range(len(params.val_databases))

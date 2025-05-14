@@ -10,6 +10,7 @@ from transloc4d.misc import TrainingParams
 from transloc4d.datasets import WholeDataset
 from transloc4d.models import get_model
 from transloc4d import evaluate_4drad_dataset, save_recall_results
+from transloc4d.datasets import ValSetTransform
 
 
 def load_pickle(file_path):
@@ -50,7 +51,10 @@ if __name__ == "__main__":
 
     database_sets = load_pickle(args.database_pickle)
     query_sets = load_pickle(args.query_pickle)
-    test_set = WholeDataset(args.database_pickle, args.query_pickle)
+    test_set = WholeDataset(
+        args.database_pickle, args.query_pickle,
+        input_transform=ValSetTransform(1, mean=params.norm_mean, std=params.norm_std)
+        )
 
     # Run the evaluation
     recall_metrics = evaluate_4drad_dataset(model, device, test_set, params)

@@ -95,7 +95,6 @@ def estimate_ego_vel(radar_scan, C_stab_r=None, retain_vel=False, maximum_range=
                 radar_scan_inlier = radar_scan_inlier[inlier_idx_best]
                 if not retain_vel:
                     H = radar_data[inlier_idx_best, :3]
-                    # Replace the 4th column with the dot product as in the original code.
                     radar_scan_inlier[:, 3] = np.dot(H, v_e_norm)
                 return success, v_e, radar_scan_inlier.astype(radar_scan.dtype)
             else:

@@ -21,13 +21,13 @@ from misc import TrainingParams
 def make_datasets(params: TrainingParams, validation: bool = True):
     # Create training and validation datasets
     datasets = {}
-    train_set_transform = TrainSetTransform(params.set_aug_mode)  # data augumentation  rotation flip
-    val_set_transform = ValSetTransform(params.set_aug_mode)  
+    train_set_transform = TrainSetTransform(params.set_aug_mode, mean=params.norm_mean, std=params.norm_std)  # data augumentation  rotation flip
     train_transform = PNVTrainTransform(params.aug_mode) 
 
     datasets['train'] = PNVTrainingDataset(params.dataset_folder, params.train_file,
                                            transform=train_transform, set_transform=train_set_transform,)
     if validation:
+        val_set_transform = ValSetTransform(1)  
         datasets['val'] = PNVTrainingDataset(params.dataset_folder, params.val_file, set_transform=val_set_transform)
 
     return datasets

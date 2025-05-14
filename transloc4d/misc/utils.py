@@ -151,6 +151,10 @@ class TrainingParams:
 
         self.num_workers = params.getint("num_workers", 0)
 
+        # Doppler & intensity normalization
+        self.norm_mean = [params.getfloat("v_mean", 0.0), params.getfloat("i_mean", 0.0)]
+        self.norm_std = [params.getfloat("v_std", 1.0), params.getfloat("i_std", 10.0)]
+
         # Initial batch size for global descriptors (for both main and secondary dataset)
         self.batch_size = params.getint("batch_size", 64)
         # When batch_split_size is non-zero, multistage backpropagation is enabled

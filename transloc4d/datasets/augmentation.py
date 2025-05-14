@@ -22,14 +22,24 @@ class Normalize:
         return data
     
 class TrainSetTransform:
-    def __init__(self, aug_mode):
+    def __init__(self, aug_mode, mean=[0, 0], std=[1, 10.0]):
         self.aug_mode = aug_mode
         if self.aug_mode == 1:
             t = [RandomRotation(max_theta=5, axis=np.array([0, 0, 1])),
                  RandomFlip([0.25, 0.25, 0.]),
-                 Normalize(dim=3, mean=[0, 0], std=[1, 10.0])] 
+                 Normalize(dim=3, mean=mean, std=std)] 
+        elif self.aug_mode == 2:
+            t = [
+                RandomRotation(max_theta=5, axis=np.array([0, 0, 1])),
+                RandomFlip([0.25, 0.25, 0.]),
+                RandomScale(scale_range=(0.95, 1.05)),
+                RandomCenter(),
+                RandomDopplerNoise(sigma=0.09, clip=0.135),
+                RandomIntensityNoise(sigma=1.0),
+                Normalize(dim=3, mean=mean, std=std)
+            ]
         else:
-            raise NotImplementedError('Unknown aug_mode: {}'.format(self.aug_mode))
+            raise NotImplementedError(f'Unknown aug_mode: {self.aug_mode}')
         self.transform = transforms.Compose(t)
 
     def __call__(self, e):
@@ -38,14 +48,12 @@ class TrainSetTransform:
         return e
 
 class ValSetTransform:
-    def __init__(self, aug_mode):
+    def __init__(self, aug_mode, mean=[0, 0], std=[1, 10.0]):
         self.aug_mode = aug_mode
         if self.aug_mode == 1:
-            t = [Normalize(dim=3, mean=[0, 0], std=[1, 10.0])]
-            # t = [RandomRotation(max_theta=30, axis=np.array([0, 0, 1])),
-            #      RandomFlip([0.25, 0.25, 0.])]
+            t = [Normalize(dim=3, mean=mean, std=std)]
         else:
-            raise NotImplementedError('Unknown aug_mode: {}'.format(self.aug_mode))
+            raise NotImplementedError(f'Unknown aug_mode: {self.aug_mode}')
         self.transform = transforms.Compose(t)
 
     def __call__(self, e):
@@ -214,3 +222,52 @@ class RemoveRandomBlock:
             mask = (x < coords[..., 0]) & (coords[..., 0] < x+w) & (y < coords[..., 1]) & (coords[..., 1] < y+h)
             coords[mask] = torch.zeros_like(coords[mask])
         return coords
+
+# 4D-specific augmentations
+class RandomDopplerNoise:
+    """
+        Add Gaussian noise to Doppler channel (4th).
+        Args:
+            sigma (float): standard deviation of the Gaussian noise (m/s).  
+                Models the sensor’s accuracy (random measurement jitter).
+            clip (float): half of the Doppler resolution step (m/s).  
+                Models quantization error as uniform noise in [–clip, +clip].
+
+    """
+    def __init__(self, sigma=0.09, clip=0.135):
+        self.sigma = sigma
+        self.clip = clip
+    def __call__(self, data):
+        # quantization
+        q = torch.rand_like(data[...,3]) * 2*self.clip - self.clip
+        # Gaussian
+        g = torch.randn_like(data[...,3]) * self.sigma
+        data[...,3] += q + g
+        return data
+
+class RandomIntensityNoise:
+    """Add Gaussian noise to intensity channel (5th)."""
+    def __init__(self, sigma=1.0):
+        self.sigma = sigma
+    def __call__(self, data):
+        data[..., 4] += torch.randn_like(data[..., 4]) * self.sigma
+        return data
+
+class RandomScale:
+    """Uniformly scale XYZ coordinates."""
+    def __init__(self, scale_range=(0.95, 1.05)):
+        self.scale_min, self.scale_max = scale_range
+    def __call__(self, data):
+        s = random.uniform(self.scale_min, self.scale_max)
+        data[..., :3] *= s
+        return data
+
+class RandomCenter:
+    """Recenter around a random point within bounding box."""
+    def __call__(self, data):
+        pts = data[..., :3]
+        mn = pts.amin(dim=-2, keepdim=True)
+        mx = pts.amax(dim=-2, keepdim=True)
+        ref = mn + (mx - mn) * torch.rand_like(mn)
+        data[..., :3] -= ref
+        return data

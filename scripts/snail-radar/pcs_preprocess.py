@@ -8,7 +8,6 @@ from tqdm import tqdm
 import bisect
 from multiprocessing import Pool
 import shutil
-import json
 from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import Slerp
 
@@ -227,7 +226,7 @@ def preprocess_frame(args):
     radar_scan = pts[:, [ix, iy, iz, idop, ipow]].astype(np.float32)
     flag, _, proc_scan = estimate_ego_vel(radar_scan, maximum_range=maximum_range)
     if not flag:
-        proc_scan = radar_scan.copy()
+        return None
 
     if W == 1:
         proc_scan[:, :3] = norm_func(proc_scan[:, :3])

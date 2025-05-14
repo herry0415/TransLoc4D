@@ -110,7 +110,7 @@ def main():
     )
     
     parser.add_argument(
-        "--max_range", type=float, default=400.0,
+        "--max_range", type=float, default=250.0,
         help="Max distance (in meters) to include points; others are skipped")
 
     parser.add_argument("--add_suffix", type=str, default=None,
