@@ -115,6 +115,7 @@ def main():
 
     parser.add_argument("--add_suffix", type=str, default=None,
                         help="Additional info to be added to the output folder name.")
+    parser.add_argument("--gap_size", type=float, default=5, help="Gap size between frames.")
         
     args = parser.parse_args()
     base_dir = args.base_dir
@@ -144,7 +145,9 @@ def main():
                 "--dataset_root", datasets_root,
                 "--norm_type", args.norm_type,
                 "--maximum_range", str(args.max_range), 
-                "--add_suffix", args.add_suffix]
+                "--add_suffix", args.add_suffix,
+                "--gap_size", str(args.gap_size)
+                ]
             try:
                 result = subprocess.run(
                     command,

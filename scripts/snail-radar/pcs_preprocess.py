@@ -369,6 +369,8 @@ def get_args():
                         help="Maximum range of pts to be kept.")
     parser.add_argument("--add_suffix", type=str, default="",
                         help="Additional info to be added to the output folder name.")
+    parser.add_argument("--gap_size", type=float, default=5,
+                        help="Gap size between frames.")
 
     args = parser.parse_args()
     if args.save_folder is None:
@@ -390,7 +392,6 @@ def main():
 
     if args.norm_type == "range":
         norm_func = lambda points: normalize_range(points, range=args.maximum_range)
-        
     elif args.norm_type == "sphere":
         norm_func = normalize_sphere
     else:
@@ -440,6 +441,7 @@ def main():
         sorted_image_entries = None
 
     W = args.accum_win
+    gap = int(args.gap_size)
 
     # Stage 1: per-frame preprocessing with init_stage1
     init1_args = (
@@ -448,7 +450,7 @@ def main():
         args.target_points, interp_poses, Body_T_L, Body_T_R,
         norm_func, args.maximum_range
     )
-    tasks1 = [(idx, fn) for idx, fn in enumerate(pcd_files)]
+    tasks1 = [(idx, fn) for idx, fn in enumerate(pcd_files) if (W > 1) or (idx % gap == 0)]
     results = []
     with Pool(initializer=init_stage1, initargs=init1_args) as pool:
         if W == 1:
@@ -465,7 +467,7 @@ def main():
     if W > 1:
         windows, centers = [], []
         N = len(pcd_files)
-        for start in range(N - W + 1):
+        for start in range(0, N - W + 1, gap):
             win = list(range(start, start + W))
             windows.append(win)
             centers.append(win[W // 2])
