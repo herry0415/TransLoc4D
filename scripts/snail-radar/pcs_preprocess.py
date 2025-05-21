@@ -369,8 +369,11 @@ def get_args():
                         help="Maximum range of pts to be kept.")
     parser.add_argument("--add_suffix", type=str, default="",
                         help="Additional info to be added to the output folder name.")
-    parser.add_argument("--gap_size", type=float, default=5,
-                        help="Gap size between frames.")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--gap_size", type=float, default=None,
+                       help="Sample gap size between frames.")
+    group.add_argument("--interval_dist", type=float, default=None,
+                       help="Sample minimum distance between frames (meters).")
 
     args = parser.parse_args()
     if args.save_folder is None:
@@ -441,16 +444,35 @@ def main():
         sorted_image_entries = None
 
     W = args.accum_win
-    gap = int(args.gap_size)
+    gap = args.gap_size
+    sample_dist = args.interval_dist
 
-    # Stage 1: per-frame preprocessing with init_stage1
+    # Stage 1: per-frame preprocessing
     init1_args = (
         radar_folder, save_pc_folder, W, args.generate_original,
         args.generate_images, image_folder, sorted_image_entries,
         args.target_points, interp_poses, Body_T_L, Body_T_R,
         norm_func, args.maximum_range
     )
-    tasks1 = [(idx, fn) for idx, fn in enumerate(pcd_files) if (W > 1) or (idx % gap == 0)]
+    # build tasks list
+    tasks1 = []
+    last_pos = None
+    for idx, fn in enumerate(pcd_files):
+        include = False
+        if W == 1:
+            if gap is not None and idx % int(gap) == 0:
+                include = True
+            if sample_dist is not None:
+                curr_pos = interp_poses[idx][:3, 3]
+                if last_pos is None or np.linalg.norm(curr_pos - last_pos) >= sample_dist:
+                    include = True
+        else:
+            include = True
+        if include:
+            tasks1.append((idx, fn))
+            if include and sample_dist is not None:
+                last_pos = interp_poses[idx][:3, 3]
+
     results = []
     with Pool(initializer=init_stage1, initargs=init1_args) as pool:
         if W == 1:
@@ -463,14 +485,25 @@ def main():
                                      total=len(tasks1), desc="Estimating ego velocity"))
             preproc_list = [r for r in preproc_list if r]
 
-    # Stage 2: window accumulation (unchanged)
+    # Stage 2: window accumulation
     if W > 1:
-        windows, centers = [], []
         N = len(pcd_files)
-        for start in range(0, N - W + 1, gap):
-            win = list(range(start, start + W))
-            windows.append(win)
-            centers.append(win[W // 2])
+        centers = []
+        if gap is not None:
+            for start in range(0, N - W + 1, int(gap)):
+                centers.append(start + W // 2)
+        else:
+            last_pos = None
+            for idx in range(N):
+                curr_pos = interp_poses[idx][:3, 3]
+                if last_pos is None or np.linalg.norm(curr_pos - last_pos) >= sample_dist:
+                    if idx - W // 2 >= 0 and idx + W // 2 < N:
+                        centers.append(idx)
+                    last_pos = curr_pos
+        windows = []
+        for c in centers:
+            start = c - W // 2
+            windows.append(list(range(start, start + W)))
 
         init2_args = (preproc_list, interp_poses, Body_T_L, Body_T_R,
                       W, save_pc_folder, args.generate_original,

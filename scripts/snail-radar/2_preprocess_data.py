@@ -115,7 +115,11 @@ def main():
 
     parser.add_argument("--add_suffix", type=str, default=None,
                         help="Additional info to be added to the output folder name.")
-    parser.add_argument("--gap_size", type=float, default=5, help="Gap size between frames.")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--gap_size", type=float, default=None,
+                       help="Sample gap size between frames.")
+    group.add_argument("--interval_dist", type=float, default=None,
+                       help="Sample minimum distance between frames (meters).")
         
     args = parser.parse_args()
     base_dir = args.base_dir
@@ -145,9 +149,13 @@ def main():
                 "--dataset_root", datasets_root,
                 "--norm_type", args.norm_type,
                 "--maximum_range", str(args.max_range), 
-                "--add_suffix", args.add_suffix,
-                "--gap_size", str(args.gap_size)
+                "--add_suffix", args.add_suffix
                 ]
+            if args.gap_size is not None:
+                command += ["--gap_size", str(args.gap_size)]
+            if args.interval_dist is not None:
+                command += ["--interval_dist", str(args.interval_dist)]
+            
             try:
                 result = subprocess.run(
                     command,
