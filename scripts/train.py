@@ -102,6 +102,15 @@ def training_step(global_iter, model, phase, device, optimizer, loss_fn):
         stats.update(temp_stats)
         if phase == 'train':
             loss.backward()
+
+            total_norm = 0.0
+            for p in model.parameters():
+                if p.grad is not None:
+                    param_norm = p.grad.data.norm(2)
+                    total_norm += param_norm.item() ** 2
+            total_norm = total_norm ** 0.5
+            stats['grad_norm'] = total_norm
+
             optimizer.step()
 
     torch.cuda.empty_cache()  # Prevent excessive GPU memory consumption by SparseTensors
@@ -165,6 +174,14 @@ def multistaged_training_step(global_iter, model, phase, device, optimizer, loss
                 # By default gradients are accumulated
                 embeddings.backward(gradient=embeddings_grad[i: i+minibatch_size])
                 i += minibatch_size
+
+            total_norm = 0.0
+            for p in model.parameters():
+                if p.grad is not None:
+                    param_norm = p.grad.data.norm(2)
+                    total_norm += param_norm.item() ** 2
+            total_norm = total_norm ** 0.5
+            stats['grad_norm'] = total_norm
 
             optimizer.step()
 
@@ -280,6 +297,8 @@ def do_train(params: TrainingParams, model_name, weights_folder, resume_filename
     )
 
     for epoch in outer:
+        epoch_start = time.time()
+
         metrics = {'epoch': epoch, 'train': {}, 'val': {}}
         current_val_recall = 0
         outer.write(f">> epoch: {epoch}, lr: {optimizer.param_groups[0]['lr']}")
@@ -333,9 +352,16 @@ def do_train(params: TrainingParams, model_name, weights_folder, resume_filename
         if 'recall' in epoch_stats['global']:
             # Save training recall@1 when phase is "train"
             metrics[phase]['recall@1'] = epoch_stats['global']['recall'][1]
-        if 'ap' in epoch_stats['global']:
-            metrics[phase]['AP'] = epoch_stats['global']['ap']
 
+        # embedding norm (from stats)
+        metrics[phase]['embedding_norm'] = epoch_stats['global'].get('avg_embedding_norm', np.nan)
+        # gradient-norm
+        metrics[phase]['grad_norm'] = epoch_stats['global'].get('grad_norm', np.nan)
+        # epoch duration
+        metrics[phase]['epoch_time'] = time.time() - epoch_start
+        # GPU memory usage (GB)
+        if device == "cuda":
+            metrics[phase]['gpu_max_mem_GB'] = torch.cuda.max_memory_allocated() / (1024 ** 3)
 
         if scheduler is not None:
             scheduler.step()
@@ -399,6 +425,11 @@ def do_train(params: TrainingParams, model_name, weights_folder, resume_filename
             json.dump(train_metrics, f, indent=4)
         
         writer.add_scalar("train/loss1", metrics['train']['loss1'], epoch)
+        writer.add_scalar("train/embedding_norm", metrics['train']['embedding_norm'], epoch)
+        writer.add_scalar("train/grad_norm", metrics['train']['grad_norm'], epoch)
+        writer.add_scalar("train/epoch_time", metrics['train']['epoch_time'], epoch)
+        if device == "cuda":
+            writer.add_scalar("gpu/max_memory_allocated_GB", metrics['train']['gpu_max_mem_GB'], epoch)
         # Log validation recall only when testing is performed.
         if len(metrics['val']) > 0:
             for key, value in metrics['val'].items():
@@ -409,7 +440,7 @@ def do_train(params: TrainingParams, model_name, weights_folder, resume_filename
     writer.close()  # Close the TensorBoard writer when training completes
 
 
-def create_weights_folder(model_name, ssataset_name):
+def create_weights_folder(model_name, dataset_name):
     # Create a folder to save weights of trained models
     this_file_path = pathlib.Path(__file__).parent.absolute()
     temp, _ = os.path.split(this_file_path)
