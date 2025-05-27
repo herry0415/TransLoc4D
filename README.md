@@ -32,11 +32,11 @@ Alternatively, perform a manual installation as follows:
 ## Datasets and Model Weights
 
 ## NTU4DPR+SJTU4DPR
-The datasets used in this study (dynamic points removed with velocity) can be found [here](https://entuedu-my.sharepoint.com/:f:/g/personal/heshan001_e_ntu_edu_sg/EtDhy41KPAFFqTD6wb9-1EABl-bXqnez8HXFRJgIPOJosg?e=IRzzft), and model weights trained on the NTU dataset are available [here](https://entuedu-my.sharepoint.com/:f:/g/personal/heshan001_e_ntu_edu_sg/EpNaXwtTW99KghTTzrkbisEBQX5wDyVvmIjRBQZF8e7_Kg?e=55Qpup).
+The datasets used in this study (dynamic points removed with velocity) can be found [here](https://entuedu-my.sharepoint.com/:f:/g/personal/heshan001_e_ntu_edu_sg/EtDhy41KPAFFqTD6wb9-1EABl-bXqnez8HXFRJgIPOJosg?e=IRzzft).
 
 
 ### Model Performance
-Model trained on `NTU4DPR`.
+Weights (`transloc4d.pth`) trained on `NTU4DPR` are availble [here](https://entuedu-my.sharepoint.com/:f:/g/personal/heshan001_e_ntu_edu_sg/EpNaXwtTW99KghTTzrkbisEBQX5wDyVvmIjRBQZF8e7_Kg?e=55Qpup).
 
 | Test Set     | nyl-night | nyl-rain | src-night | sjtu4dpr-testa | sjtu4dpr-testb |
 | ------------ | --------- | -------- | --------- | -------------- | -------------- |
@@ -46,6 +46,19 @@ Model trained on `NTU4DPR`.
 ## [SNAIL-RADAR](https://snail-radar.github.io/)
 To prepare the dataset please refer to [here](scripts/snail-radar/README.md).
 
+### Model Performance
+Weights (`transloc4d_snail.pth`) trained on `SNAIL-RADAR` are availble [here](https://entuedu-my.sharepoint.com/:f:/g/personal/heshan001_e_ntu_edu_sg/EpNaXwtTW99KghTTzrkbisEBQX5wDyVvmIjRBQZF8e7_Kg?e=55Qpup) .
+
+| Route | Recall@1 | Recall@5 | Recall@10 |
+|:------|---------:|---------:|----------:|
+| bc    |    0.6162 |    0.7509 |     0.8028 |
+| sl    |    0.7105 |    0.8079 |     0.8420 |
+| ss    |    0.6227 |    0.7336 |     0.7785 |
+| if    |    0.9375 |    0.9760 |     0.9849 |
+| iaf   |    0.9381 |    0.9764 |     0.9830 |
+| iaef  |    0.9039 |    0.9477 |     0.9587 |
+| st    |    0.9539 |    0.9691 |     0.9772 |
+| 81r   |    0.8600 |    0.9239 |     0.9425 |
 
 
 ## Usage
