@@ -99,7 +99,7 @@ def main():
     parser.add_argument(
         "--norm_type",
         type=str,
-        default="sphere",
+        default="range",
         choices=["range", "sphere", "raw"],
         help=(
             "Normalization type for point clouds: "

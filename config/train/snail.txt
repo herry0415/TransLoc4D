@@ -6,13 +6,18 @@ num_workers = 8
 # 2048, 1536
 batch_size = 2048
 # 128, 96
-batch_split_size = 64
-val_batch_size = 96
+batch_split_size = 256
+val_batch_size = 256
 
 lr = 1e-3
-epochs = 500
+epochs = 200
+# Adam, AdamW
+optimizer = Adam
+# MultiStepLR, CosineAnnealingLR
+scheduler = MultiStepLR
 scheduler_milestones = 350, 450
 aug_mode = 1
+set_aug_mode = 1
 weight_decay = 1e-4
 loss = TruncatedSmoothAP
 tau1 = 0.01
@@ -21,7 +26,13 @@ save_freq = 2
 save_from = 20
 save_milestones = 1, 5, 10, 25, 50, 75, 125
 
+# Doppler & Intesity mean std for normalization
+v_mean = 0
+i_mean = 0
+v_std = 1
+i_std = 10
+
 train_file = train_queries_snail_pos9_nonneg18_75.pickle
-val_queries = snail_val_evaluation_query_9_30.pickle, bc_test_evaluation_query_9_30.pickle
-val_databases = snail_val_evaluation_database_9_30.pickle, bc_test_evaluation_database_9_30.pickle
+val_queries = snail_val_evaluation_query_9_30.pickle
+val_databases = snail_val_evaluation_database_9_30.pickle
 

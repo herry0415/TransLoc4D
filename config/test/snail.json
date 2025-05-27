@@ -9,13 +9,14 @@
         "iaf_test",
         "iaef_test",
         "st_test",
-        "81r_test",
-        "snail_val"
+        "81r_test"
     ],
     "weights_paths": [
-      "weights/transloc4d.pth"
+      "weights/transloc4d_snail.pth"
     ],
     "model_config": "config/model/transloc4d.txt",
-    "posDist": 9
+    "config": "config/train/snail.txt",
+    "posDist": 9,
+    "posHeading": 30
   }
 ]
