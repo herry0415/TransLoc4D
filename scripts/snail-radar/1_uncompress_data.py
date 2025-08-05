@@ -30,6 +30,7 @@ KEPT_FOLDERS = [
     "eagleg7/enhanced",
     "x36d",
     "zed2i/left",
+    "xt32"
 ]
 
 
