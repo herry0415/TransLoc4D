@@ -45,7 +45,7 @@ GLOBAL_TARGET_POINTS = None
 GLOBAL_PCD_FILES = None
 GLOBAL_NORM_FUNC = None
 
-
+# 把 Stage1（每帧预处理）需要的所有参数存入全局变量，供 preprocess_frame() 使用（主要用于多进程初始化）。
 def init_stage1(radar_folder, save_pc_folder, W, generate_original,
                 generate_images, image_folder, sorted_image_entries,
                 target_points, interp_poses, Body_T_L, Body_T_R,
@@ -69,7 +69,7 @@ def init_stage1(radar_folder, save_pc_folder, W, generate_original,
     GLOBAL_NORM_FUNC     = norm_func
     GLOBAL_MAXIMUM_RANGE = maximum_range
 
-
+# 把 Stage2（窗口累积）所需参数写入全局变量，包含 preproc_list（stage1 输出），插值位姿、外参、保存路径等。
 def init_stage2(preproc_list, interp_poses, Body_T_L, Body_T_R,
                 W, save_pc_folder,
                 generate_original, generate_images,
@@ -92,21 +92,21 @@ def init_stage2(preproc_list, interp_poses, Body_T_L, Body_T_R,
     GLOBAL_SORTED_IMAGES = sorted_image_entries
     GLOBAL_TARGET_POINTS = target_points
     GLOBAL_PCD_FILES     = pcd_files
-    GLOBAL_NORM_FUNC     = GLOBAL_NORM_FUNC
+    GLOBAL_NORM_FUNC     = GLOBAL_NORM_FUNC #todo 未正确设置
 
-
+# 对四元数序列做球面线性插值（Slerp），在 querytimes 上求插值四元数
 def rot_slerp_batch(keytimes, keyquats, querytimes):
     keyrots = R.from_quat(keyquats)
     slerp = Slerp(keytimes, keyrots)
     interp_rots = slerp(querytimes)
     return interp_rots.as_quat()
-
+# 对位置坐标（每轴）做线性插值，返回 querytimes 上的位置
 def pos_interpolate_batch(keytimes, keypositions, querytimes):
     interp_positions = np.zeros((len(querytimes), 3))
     for i in range(keypositions.shape[1]):
         interp_positions[:, i] = np.interp(querytimes, keytimes, keypositions[:, i])
     return interp_positions
-
+# 实现细节：先插位移（pos_interpolate_batch），再插四元数（rot_slerp_batch），最后将旋转矩阵与位置拼成 4×4。
 def interpolation(gt_times, gt_positions, gt_quats, radar_times):
     interp_positions = pos_interpolate_batch(gt_times, gt_positions, radar_times)
     interp_quats = rot_slerp_batch(gt_times, gt_quats, radar_times)
