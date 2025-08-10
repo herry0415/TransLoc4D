@@ -261,6 +261,7 @@ def preprocess_frame(args):
         return (processed_timestamp, ty, tx, tz, roll, pitch, yaw)
     else:
         return (idx, processed_timestamp, ts_float, radar_scan, proc_scan)
+      # 若 W > 1（要做多帧累积），不立刻保存点云，而是返回 (idx, processed_timestamp, ts_float, radar_scan, proc_scan)，供 Stage2 使用。
 
 def process_accumulate_window(args):
     window_idxs, center_idx = args
@@ -449,7 +450,7 @@ def main():
     gap = args.gap_size
     sample_dist = args.interval_dist
 
-    # Stage 1: per-frame preprocessing
+    #！ Stage 1: per-frame preprocessing
     init1_args = (
         radar_folder, save_pc_folder, W, args.generate_original,
         args.generate_images, image_folder, sorted_image_entries,
@@ -487,7 +488,7 @@ def main():
                                      total=len(tasks1), desc="Estimating ego velocity"))
             preproc_list = [r for r in preproc_list if r]
 
-    # Stage 2: window accumulation
+    #！Stage 2: window accumulation
     if W > 1:
         N = len(pcd_files)
         centers = []
